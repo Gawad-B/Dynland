@@ -117,6 +117,34 @@ the error with `console.error`, and the island carries on.
 - Animations: about 350 ms with a spring-like ease. They respect GNOME's
   `enable-animations` setting and Dynland's `reduce-motion` switch.
 
+### Motion (inspired by lottiefiles.com/free-animations/dynamic-island)
+
+The reference animations (recording timer, flight card, music player, incoming call,
+three-bar equalizer, FaceTime controls) share one motion language, which Dynland follows:
+
+1. **Shape first, content second.** On any state change the old content fades out quickly
+   (~100 ms). The black shape then morphs its width, height and corner radius with a
+   spring (slight overshoot, ~400 ms), anchored at the top centre. Only after the shape
+   is mostly there does the new content fade in (~200 ms, starting ~150 ms into the
+   morph), rising from 90 % scale and slightly transparent to full.
+2. **Radius follows size.** The compact pill is fully round (radius = half its height);
+   expanded cards use a large continuous radius (~28 px). The radius animates with the
+   size rather than jumping.
+3. **Compact content hugs the edges.** A leading element on the left (app icon, album
+   art) and a trailing live indicator on the right (equalizer bars, timer), with empty
+   black space between them, like the camera cut-out on a phone.
+4. **Equalizer bars** are three rounded bars, vertically centred so they grow up and down
+   together, with smooth eased height changes (not random jumps), in an accent colour
+   (pink-to-magenta by default).
+5. **Expanded media card**: album art top-left, title and artist beside it, equalizer
+   top-right, a progress bar with elapsed time on the left and total time on the right,
+   and large centred ⏮ ⏯ ⏭ controls underneath.
+6. **Action buttons** in expanded cards are round, filled buttons (a dismiss/decline action
+   red, a primary action green, others dark grey with a white icon), as in the call cards.
+
+All of this collapses to instant changes when `reduce-motion` is on or GNOME animations
+are off.
+
 ## Settings (GSettings `org.gnome.shell.extensions.dynland`)
 
 | Key | Type | Default |
