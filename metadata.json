@@ -1,0 +1,9 @@
+{
+  "uuid": "dynland@gawad-b.github.io",
+  "name": "Dynland",
+  "description": "A dynamic island that replaces the top bar: clock, Quick Settings, workspaces and every extension's indicators in one pill that morphs for notifications, media, volume/brightness, battery and prayer times.",
+  "shell-version": ["50", "51"],
+  "settings-schema": "org.gnome.shell.extensions.dynland",
+  "url": "https://github.com/Gawad-B/Dynland",
+  "version": 1
+}
