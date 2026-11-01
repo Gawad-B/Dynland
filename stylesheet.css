@@ -1,0 +1,111 @@
+/* Dynland island. Rows are named #panel, so GNOME's panel-button styles
+   apply to the borrowed indicators; these rules only shape the pill. */
+
+.dynland-island {
+  background-color: #000000;
+  color: #ffffff;
+  border-radius: 18px;
+  padding: 2px 6px;
+  min-width: 180px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.dynland-island.dynland-expanded,
+.dynland-island.dynland-activity-expanded {
+  border-radius: 24px;
+  padding: 8px 12px;
+}
+
+.dynland-island.dynland-blur {
+  background-color: rgba(0, 0, 0, 0.55);
+}
+
+.dynland-island .dynland-row#panel {
+  background-color: transparent;
+  spacing: 4px;
+}
+
+.dynland-row2 {
+  padding-top: 4px;
+}
+
+.dynland-slot {
+  spacing: 2px;
+}
+
+.dynland-date {
+  font-weight: bold;
+  padding: 0 10px;
+}
+
+.dynland-activity {
+  padding: 4px 8px;
+  min-height: 28px;
+}
+
+/* Shared controls */
+.dynland-icon-button {
+  border-radius: 999px;
+  padding: 6px;
+  color: #ffffff;
+}
+.dynland-icon-button:hover {
+  background-color: rgba(255, 255, 255, 0.17);
+}
+.dynland-pill-button {
+  border-radius: 999px;
+  padding: 6px 14px;
+  margin: 0 3px;
+  background-color: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  font-weight: bold;
+}
+.dynland-pill-button:hover {
+  background-color: rgba(255, 255, 255, 0.22);
+}
+.dynland-level-track {
+  height: 6px;
+  border-radius: 3px;
+  background-color: rgba(255, 255, 255, 0.25);
+}
+.dynland-level-fill {
+  height: 6px;
+  border-radius: 3px;
+  background-color: #ffffff;
+}
+
+/* Notifications */
+.dynland-notification-compact { spacing: 8px; }
+.dynland-notification-title { font-weight: bold; }
+.dynland-notification-card { spacing: 8px; min-width: 360px; max-width: 420px; }
+.dynland-notification-header { spacing: 10px; }
+.dynland-notification-body { color: rgba(255, 255, 255, 0.8); }
+.dynland-notification-actions { spacing: 6px; }
+
+/* OSD */
+.dynland-osd { spacing: 10px; }
+.dynland-level-label { font-weight: bold; min-width: 2em; }
+
+/* Power */
+.dynland-power { spacing: 8px; font-weight: bold; }
+.dynland-power-charging { color: #57e389; }
+.dynland-power-low { color: #ff7b63; }
+
+/* Media */
+.dynland-media-compact { spacing: 10px; }
+.dynland-media-art { border-radius: 6px; }
+.dynland-media-clock { font-weight: bold; }
+.dynland-media-bars { spacing: 2px; height: 14px; }
+.dynland-media-bar { width: 3px; border-radius: 2px; background-color: #57e389; }
+.dynland-media-card { spacing: 10px; min-width: 380px; }
+.dynland-media-top { spacing: 12px; }
+.dynland-media-title { font-weight: bold; }
+.dynland-media-artist { color: rgba(255, 255, 255, 0.7); }
+.dynland-media-controls { spacing: 4px; }
+
+/* Prayer */
+.dynland-prayer-compact { spacing: 8px; font-weight: bold; }
+.dynland-prayer-countdown { font-feature-settings: "tnum"; color: #f6d32d; }
+.dynland-prayer-list { spacing: 4px; min-width: 200px; }
+.dynland-prayer-row { spacing: 24px; }
+.dynland-prayer-next { color: #f6d32d; font-weight: bold; }
