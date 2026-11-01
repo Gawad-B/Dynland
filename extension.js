@@ -21,6 +21,16 @@ const STRUT_HEIGHT = 48;
 
 export default class DynlandExtension extends Extension {
     enable() {
+        try {
+            this._enable();
+        } catch (e) {
+            // GNOME never calls disable() after a failed enable().
+            this.disable();
+            throw e;
+        }
+    }
+
+    _enable() {
         this._settings = this.getSettings();
         this._activities = new Map();
         this._heldId = null;
@@ -48,12 +58,7 @@ export default class DynlandExtension extends Extension {
             this._heldId = held ? id : null;
         });
 
-        try {
-            this._bridge.enable(this._island);
-        } catch (e) {
-            this._island.destroy();
-            throw e;
-        }
+        this._bridge.enable(this._island);
         Main.layoutManager.addChrome(this._island, {affectsStruts: false, trackFullscreen: true});
 
         this._updateStrut();
@@ -71,25 +76,37 @@ export default class DynlandExtension extends Extension {
             Meta.KeyBindingFlags.NONE,
             Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW,
             () => this._island.toggleExpanded());
+        this._keybound = true;
     }
 
+    // Tolerates any partially initialised state (also called after a failed enable()).
     disable() {
-        Main.wm.removeKeybinding('toggle-shortcut');
-        this._settings.disconnectObject(this);
+        if (this._keybound) {
+            Main.wm.removeKeybinding('toggle-shortcut');
+            this._keybound = false;
+        }
+        this._settings?.disconnectObject(this);
         Main.layoutManager.disconnectObject(this);
         St.ThemeContext.get_for_stage(global.stage).disconnectObject(this);
 
-        for (const activity of this._activities.values())
+        for (const activity of this._activities?.values() ?? [])
             this._safeDisable(activity);
-        this._activities.clear();
-        this._manager.clear();
+        this._activities?.clear();
+        this._manager?.clear();
 
         // Return borrowed indicators BEFORE destroying the island, or they
         // would be destroyed with it.
-        this._bridge.disable();
+        try {
+            this._bridge?.disable();
+        } catch (e) {
+            console.error('Dynland: error while returning the top bar', e);
+        }
         this._removeStrut();
-        Main.layoutManager.removeChrome(this._island);
-        this._island.destroy();
+        if (this._island) {
+            if (this._island.get_parent())
+                Main.layoutManager.removeChrome(this._island);
+            this._island.destroy();
+        }
 
         this._island = null;
         this._bridge = null;

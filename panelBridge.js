@@ -22,6 +22,8 @@ export class PanelBridge {
         this._refreshId = 0;
         this._wasVisible = true;
         this._addToPanelBoxDescriptor = null;
+        this._untracked = false;
+        this._wrapped = false;
     }
 
     /** @param {Island} island */
@@ -32,43 +34,56 @@ export class PanelBridge {
             throw new Error('Dynland: this GNOME Shell version has an unsupported panel layout');
 
         this._island = island;
+        try {
+            // GNOME re-shows tracked chrome on overview/session/monitor changes
+            // and keeps a hidden box's strut, so stop tracking it while hidden.
+            const panelBox = Main.layoutManager.panelBox;
+            this._wasVisible = panelBox.visible;
+            Main.layoutManager.untrackChrome(panelBox);
+            this._untracked = true;
+            panelBox.hide();
 
-        // GNOME re-shows tracked chrome on overview/session/monitor changes
-        // and keeps a hidden box's strut, so stop tracking it while hidden.
-        const panelBox = Main.layoutManager.panelBox;
-        this._wasVisible = panelBox.visible;
-        Main.layoutManager.untrackChrome(panelBox);
-        panelBox.hide();
+            // Indicators added later (another extension enabling) trigger a re-layout.
+            this._addToPanelBoxDescriptor = Object.getOwnPropertyDescriptor(panel, '_addToPanelBox') ?? null;
+            const addToPanelBox = panel._addToPanelBox;
+            this._wrapped = true;
+            panel._addToPanelBox = (...args) => {
+                addToPanelBox.apply(panel, args);
+                this._scheduleRefresh();
+            };
 
-        // Indicators added later (another extension enabling) trigger a re-layout.
-        this._addToPanelBoxDescriptor = Object.getOwnPropertyDescriptor(panel, '_addToPanelBox') ?? null;
-        const addToPanelBox = panel._addToPanelBox;
-        panel._addToPanelBox = (...args) => {
-            addToPanelBox.apply(panel, args);
-            this._scheduleRefresh();
-        };
+            for (const key of LAYOUT_KEYS)
+                this._settings.connectObject(`changed::${key}`, () => this._scheduleRefresh(), this);
 
-        for (const key of LAYOUT_KEYS)
-            this._settings.connectObject(`changed::${key}`, () => this._scheduleRefresh(), this);
-
-        this.refresh();
+            this.refresh();
+        } catch (e) {
+            this.disable();
+            throw e;
+        }
     }
 
+    // Safe on a partially enabled bridge.
     disable() {
         if (this._refreshId) {
             GLib.source_remove(this._refreshId);
             this._refreshId = 0;
         }
         this._settings.disconnectObject(this);
-        if (this._addToPanelBoxDescriptor)
-            Object.defineProperty(Main.panel, '_addToPanelBox', this._addToPanelBoxDescriptor);
-        else
-            delete Main.panel._addToPanelBox;
+        if (this._wrapped) {
+            if (this._addToPanelBoxDescriptor)
+                Object.defineProperty(Main.panel, '_addToPanelBox', this._addToPanelBoxDescriptor);
+            else
+                delete Main.panel._addToPanelBox;
+            this._wrapped = false;
+        }
         this._addToPanelBoxDescriptor = null;
         this._restoreAll();
-        const panelBox = Main.layoutManager.panelBox;
-        Main.layoutManager.trackChrome(panelBox, {affectsStruts: true, trackFullscreen: true});
-        panelBox.visible = this._wasVisible;
+        if (this._untracked) {
+            const panelBox = Main.layoutManager.panelBox;
+            Main.layoutManager.trackChrome(panelBox, {affectsStruts: true, trackFullscreen: true});
+            panelBox.visible = this._wasVisible;
+            this._untracked = false;
+        }
         this._island = null;
     }
 
@@ -134,8 +149,8 @@ export class PanelBridge {
         const index = parent.get_children().indexOf(container);
 
         parent.remove_child(container);
-        target.add_child(container);
         this._borrowed.push({indicator, container, parent, index});
+        target.add_child(container);
 
         // GNOME blocks banners while the calendar is open by finding the date
         // menu in the panel's centre box; once lent out, do it here.
