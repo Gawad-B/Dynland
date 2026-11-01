@@ -4,7 +4,6 @@
 .dynland-island {
   background-color: #000000;
   color: #ffffff;
-  border-radius: 18px;
   padding: 2px 6px;
   min-width: 180px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
@@ -12,7 +11,6 @@
 
 .dynland-island.dynland-expanded,
 .dynland-island.dynland-activity-expanded {
-  border-radius: 24px;
   padding: 8px 12px;
 }
 
