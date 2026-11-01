@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-01
 **Status:** Approved design, awaiting spec review
-**Target:** GNOME Shell 50 (Wayland), Fedora 44
+**Target:** GNOME Shell 50 and 51 (Wayland); developed and tested on GNOME 50.6, Fedora 44
 
 ## Goal
 
@@ -20,7 +20,11 @@ can be turned on or off in preferences.
 
 ## Approach
 
-A GNOME Shell extension, `dynland@gawad-b.github.io`, written in ESM GJS.
+A GNOME Shell extension, `dynland@gawad-b.github.io`, written in ESM GJS. `metadata.json`
+declares `shell-version: ["50", "51"]`. Every private shell API the extension touches
+(`Main.panel._addToPanelBox`, the panel boxes, `MessageTray.bannerBlocked`,
+`OsdWindowManager.show`) is checked for before use; if one is missing on a newer shell, only
+the feature that needs it turns off and the rest of the island keeps working.
 
 `Main.panel` stays alive but hidden, so the shell and other extensions keep registering
 indicators in `Main.panel.statusArea` as usual. The island re-parents the real indicator
@@ -40,19 +44,22 @@ dynland@gawad-b.github.io/
   extension.js          enable/disable; wires everything together
   island.js             Island actor: idle / expanded / activity states, morph animations
   panelBridge.js        hides Main.panel, borrows & restores indicators, watches statusArea
-  activityManager.js    priority queue + timers; decides what the island shows (pure logic)
   activities/
     notifications.js    replaces MessageTray banners
     media.js            MPRIS players (org.mpris.MediaPlayer2.*)
     osd.js              replaces Main.osdWindowManager popups for volume/brightness
     power.js            UPower: plug/unplug, low battery
     prayer.js           next-prayer countdown from prayer-times' GSettings
+  lib/activityManager.js  priority queue + timers (pure)
   lib/prayerCalc.js     prayer-time maths (pure)
   lib/layout.js         which indicators go in idle vs expanded (pure)
+  lib/extensionSettings.js  opens another extension's GSettings (shell and prefs)
   prefs.js              Adw preferences window
   schemas/org.gnome.shell.extensions.dynland.gschema.xml
   stylesheet.css
 tests/                  gjs -m unit tests for the pure modules
+tests/manual/fake-mpris.js  fake media player for testing
+scripts/                install.sh, nested.sh, in-nested.sh
 ```
 
 ### Activity interface
@@ -78,7 +85,8 @@ the error with `console.error`, and the island carries on.
 
 - About 36 px tall, centred on the primary monitor, 6 px from the top, fully rounded,
   solid black by default.
-- Left: workspace dots (click switches workspace; scrolling on the pill cycles workspaces).
+- Left: the Activities button. In GNOME 50 it *is* the workspace dots (one actor), so one
+  switch controls both. Clicking opens the overview; scrolling on the pill cycles workspaces.
 - Centre: clock (click opens the real date menu: calendar and notification list).
 - Right: indicators listed in the `idle-indicators` setting. The default is the Quick
   Settings button, which in GNOME 50 already holds the Wi-Fi, volume and battery icons.
@@ -88,9 +96,9 @@ the error with `console.error`, and the island carries on.
 ### Expanded
 
 - Triggered by hovering about 300 ms, clicking an empty area of the pill, or the
-  `toggle-shortcut` key (default `<Super>space`).
+  `toggle-shortcut` key (default `<Super>b`; `<Super>space` is GNOME's input-source switcher).
 - About 640 px wide, two rows:
-  - Row 1: Activities button, workspace dots, full date and time.
+  - Row 1: Activities button (workspace dots), the clock, and the full date.
   - Row 2: every other indicator (Vitals, tray icons, clipboard, caffeine, prayer-times, …).
 - Collapses about 600 ms after the pointer leaves, but never while one of its menus is open.
 
@@ -99,7 +107,7 @@ the error with `console.error`, and the island carries on.
 | Activity | Compact | Expanded (hover/click) | Duration |
 |---|---|---|---|
 | Notification | App icon + title | Card with body, action buttons; click opens the app; × or swipe up dismisses | 5 s, held while hovered; queued notifications show one after another |
-| Media | Album art left, animated bars right, clock kept | Title, artist, ⏮ ⏯ ⏭, seek bar | While playing; back to idle 10 s after pause |
+| Media | Album art left, animated bars right, clock kept | Title, artist, ⏮ ⏯ ⏭, progress bar (display only; GNOME's MPRIS wrapper has no seek) | While playing; back to idle 10 s after pause |
 | Volume / brightness | Icon + level bar | — | 1.5 s after the last change |
 | Power | ⚡ + %, green when plugging in, red when low | — | 3 s; low warning at 10 % and 5 % |
 | Prayer | Prayer name + countdown | Today's prayer list | From `prayer-lead-minutes` (default 15) before a prayer until it starts |
@@ -113,14 +121,15 @@ the error with `console.error`, and the island carries on.
 
 | Key | Type | Default |
 |---|---|---|
-| `show-clock`, `show-quick-settings`, `show-workspaces`, `show-activities`, `show-tray-indicators` | b | true |
+| `show-clock`, `show-quick-settings`, `show-activities`, `show-tray-indicators` | b | true |
 | `activity-notifications`, `activity-media`, `activity-osd`, `activity-power`, `activity-prayer` | b | true |
 | `idle-indicators` | as | `['quickSettings']` (keys are `Main.panel.statusArea` names) |
 | `reserve-space` | b | true (maximised windows sit below the island) |
 | `style` | s | `'solid'` (`'solid'` or `'blur'`) |
 | `reduce-motion` | b | false |
 | `prayer-lead-minutes` | i | 15 |
-| `toggle-shortcut` | as | `['<Super>space']` |
+| `toggle-shortcut` | as | `['<Super>b']` |
+| `debug-fake-prayer-minutes` | i | -1 (testing only, not in prefs: pretend the next prayer is N minutes after enable) |
 
 When an activity is turned off, GNOME's default behaviour comes back: notifications use
 the standard banner, and volume/brightness use the standard OSD popup.
@@ -132,23 +141,39 @@ the standard banner, and volume/brightness use the standard OSD popup.
 
 ## Integration details
 
-- **Hiding the panel:** set `Main.panel` height to 0 and opacity to 0, and make it
-  non-reactive; the actor is never destroyed. The island is added with
-  `Main.layoutManager.addTopChrome(island, { affectsStruts: reserveSpace, trackFullscreen: true })`.
+- **Hiding the panel:** hide `Main.layoutManager.panelBox`; nothing is destroyed. The island
+  is added with `addTopChrome(island, {affectsStruts: false, trackFullscreen: true})` so its
+  morphing never resizes windows. When `reserve-space` is on, a separate invisible,
+  non-reactive 48 px band is added with `affectsStruts: true`.
+- **Styling:** the island's rows are named `panel`, so GNOME's and other extensions'
+  `#panel …` CSS applies to the borrowed indicators unchanged.
 - **Borrowing indicators:** for each `statusArea` entry, remember its original parent and
-  index, then reparent `indicator.container` into an island box. Connect to `statusArea`
-  changes (wrapping `Main.panel.addToStatusArea`) so indicators added later are picked up.
+  index, then reparent `indicator.container` into an island box. Indicators added later are
+  picked up by wrapping `Main.panel._addToPanelBox` (an instance override, removed on
+  disable), which schedules a re-layout: restore everything, then lend it out again.
   On disable, restore them in reverse order.
-- **Notifications:** hook `Main.messageTray` so the island draws the banner instead of
-  `_bannerBin`. Restore the original methods on disable.
-- **OSD:** wrap `Main.osdWindowManager.show` and forward the call when `activity-osd` is off.
-- **Media:** watch the session bus for `org.mpris.MediaPlayer2.*` names. The most recently
-  playing player wins.
+- **Notifications:** listen to each source's `notification-request-banner` and apply the
+  same filters as GNOME (acknowledged, low urgency, per-app banner policy, which also
+  covers Do Not Disturb). GNOME's own banner is suppressed by keeping
+  `MessageTray.bannerBlocked` true. GNOME also sets that flag when the calendar opens,
+  so an instance accessor stores the calendar's wish separately, and the island shows
+  nothing while the calendar is open. A notification counts as seen
+  (`acknowledged = true`) once the island finishes showing it. On disable, GNOME's banner
+  shows any notifications still waiting.
+- **OSD:** instance overrides of `Main.osdWindowManager.show` and `showAll` (which
+  `showOne` also reaches). Only `audio-volume-*` and `display-brightness-*` icons go to the
+  island; everything else, and any failure, falls through to GNOME's popup.
+- **Media:** reuse GNOME's `MprisSource` from `ui/mpris.js`. The most recently started
+  player wins. The progress bar polls the player's `Position` and `mpris:length` once a
+  second while expanded.
 - **Power:** use the UPower display device (`org.freedesktop.UPower`).
-- **Prayer:** read location and calculation method from
-  `org.gnome.shell.extensions.prayer-times`, loading that schema from the prayer-times
-  extension's `schemas/` dir. If it isn't installed, the prayer activity is unavailable and
-  greyed out in prefs.
+- **Prayer:** read latitude, longitude, calculation method, madhab and high-latitude rule
+  from `org.gnome.shell.extensions.prayer-times`, loading that schema from the prayer-times
+  extension's `schemas/` dir. `lib/prayerCalc.js` computes the times itself (praytimes.org
+  algorithm with adhan's method parameters); it is tested to within 2 minutes of the
+  prayer-times extension's own adhan results for every method except
+  MoonsightingCommittee, whose seasonal rules are only approximated. If the extension
+  isn't installed, the activity is unavailable and greyed out in prefs.
 
 ## Compatibility
 
@@ -172,14 +197,16 @@ indistinguishable from before enable.
   - `activityManager`: priority, pre-emption, resume, timeouts.
   - `prayerCalc`: against known prayer times.
   - `layout`: the idle/expanded split.
-- **Nested shell:** `dbus-run-session gnome-shell --devkit --wayland`, with the extension
-  installed by symlink. Needs `mutter-devkit`; check before installing. It uses about
-  0.5–1 GB of RAM, so check `free -h` first and run one at a time.
+- **Nested shell:** `scripts/nested.sh` runs `gnome-shell --devkit --wayland` (mutter-devkit
+  50.6 is installed) under `dbus-run-session` with its own `XDG_CONFIG_HOME`, so enabling
+  Dynland there never touches the real session's settings. It refuses to start with less than
+  1.2 GB of RAM available or while another nested shell runs. `scripts/in-nested.sh` runs a
+  command (gsettings, notify-send) against the nested shell.
 - **Event triggers:**
   - `notify-send` for notifications
-  - `mpv` for media
+  - `tests/manual/fake-mpris.js` for media (mpv has no MPRIS plugin installed)
   - volume keys for the OSD
-  - a test prayer time set in prefs for the countdown
+  - `debug-fake-prayer-minutes` for the countdown
 
   Plug and unplug the charger for power events.
 - **Disable test:** enable, disable and re-enable, then confirm every indicator is back
