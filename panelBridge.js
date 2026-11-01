@@ -154,7 +154,8 @@ export class PanelBridge {
     _restoreAll() {
         for (const {indicator, container, parent, index} of this._borrowed.reverse()) {
             indicator.disconnectObject(this);
-            if (indicator.menu && Main.messageTray.bannerBlocked && indicator === Main.panel.statusArea.dateMenu)
+            // bannerBlocked is write-only; the menu closes once unmapped, after we stop listening.
+            if (indicator.menu?.isOpen && indicator === Main.panel.statusArea.dateMenu)
                 Main.messageTray.bannerBlocked = false;
             indicator.menu?.disconnectObject(this);
             container.get_parent()?.remove_child(container);
