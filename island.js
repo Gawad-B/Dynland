@@ -17,7 +17,7 @@ const CONTENT_OUT_MS = 100;
 const MORPH_MS = 400;
 const CONTENT_IN_MS = 200;
 const CONTENT_IN_DELAY_MS = 150;
-const EXPANDED_RADIUS = 28;
+const EXPANDED_RADIUS = 28; // CSS px: St scales inline px by the theme scale factor
 const CONTENT_IN_SCALE = 0.9;
 const TOP_MARGIN = 6;
 
@@ -59,6 +59,8 @@ export const Island = GObject.registerClass({
         this._shownKey = 'idle|false';
         this._pending = false;
         this._token = 0;
+        this._morphTarget = null;
+        this._errorSources = new Set();
 
         this._slots = {
             left: new St.BoxLayout({style_class: 'dynland-slot'}),
@@ -243,7 +245,7 @@ export const Island = GObject.registerClass({
             this._token++;
             this._pending = false;
             this._targetKey = key;
-            this.remove_all_transitions();
+            this._stopMorph();
             this._resetContent();
             this._applyContent();
             this._morph(false);
@@ -263,7 +265,7 @@ export const Island = GObject.registerClass({
         // A new state supersedes whatever phase was in flight.
         const token = ++this._token;
         this._targetKey = key;
-        this.remove_all_transitions();
+        this._stopMorph();
         for (const actor of this._containers())
             actor.remove_all_transitions();
 
@@ -302,6 +304,8 @@ export const Island = GObject.registerClass({
         this._pending = false;
         this._resetContent();
         this._applyContent();
+        if (token !== this._token)
+            return;
 
         const incoming = this._containers().filter(a => a.visible);
         for (const actor of incoming) {
@@ -333,7 +337,7 @@ export const Island = GObject.registerClass({
                 child.x_expand = true;
                 this._activityBin.set_child(child);
             } catch (e) {
-                this._onActivityError(activity.id, e);
+                this._reportActivityError(activity.id, e);
             }
         }
 
@@ -355,20 +359,52 @@ export const Island = GObject.registerClass({
             this.remove_style_class_name(name);
     }
 
-    _morph(animate) {
+    _stopMorph() {
         this.remove_all_transitions();
-        const [oldWidth, oldHeight] = [this.width, this.height];
+        this._morphTarget = null;
+    }
 
-        this.set_size(-1, -1);
-        const [, width] = this.get_preferred_width(-1);
-        const [, height] = this.get_preferred_height(width);
+    // The error handler may release the activity and re-enter _render, so it
+    // must never run from inside a render or swap.
+    _reportActivityError(id, error) {
+        const sourceId = GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+            this._errorSources.delete(sourceId);
+            this._onActivityError(id, error);
+            return GLib.SOURCE_REMOVE;
+        });
+        this._errorSources.add(sourceId);
+    }
 
-        if (!animate || !this.mapped || oldWidth === 0 ||
-            (oldWidth === width && oldHeight === height)) {
+    // Natural size without touching an explicit size or a running morph.
+    _naturalSize() {
+        const [, width] = super.vfunc_get_preferred_width(-1);
+        const [, height] = super.vfunc_get_preferred_height(width);
+        return [width, height];
+    }
+
+    _morph(animate) {
+        if (!animate || !this.mapped || this.width === 0) {
+            this._stopMorph();
+            this.set_size(-1, -1);
             this._reposition();
             return;
         }
 
+        const [width, height] = this._naturalSize();
+        const target = this._morphTarget;
+        // Same destination as the running morph: leave it alone (no spring restart).
+        if (target && target[0] === width && target[1] === height)
+            return;
+
+        const [oldWidth, oldHeight] = [this.width, this.height];
+        this._stopMorph();
+        if (oldWidth === width && oldHeight === height) {
+            this.set_size(-1, -1);
+            this._reposition();
+            return;
+        }
+
+        this._morphTarget = [width, height];
         this.set_size(oldWidth, oldHeight);
         this.ease({
             width,
@@ -376,13 +412,16 @@ export const Island = GObject.registerClass({
             duration: MORPH_MS,
             mode: Clutter.AnimationMode.EASE_OUT_BACK,
             // onComplete only runs when the ease finished (not when interrupted).
-            onComplete: () => this.set_size(-1, -1),
+            onComplete: () => {
+                this._morphTarget = null;
+                this.set_size(-1, -1);
+            },
         });
     }
 
     _updateRadius() {
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
-        const r = Math.min(Math.round(this.height / 2), Math.round(EXPANDED_RADIUS * scale));
+        const r = Math.min(Math.round(this.height / scale / 2), EXPANDED_RADIUS);
         if (r === this._radius)
             return;
         this._radius = r;
@@ -416,6 +455,9 @@ export const Island = GObject.registerClass({
 
     _onDestroy() {
         this._token++;
+        for (const id of this._errorSources)
+            GLib.source_remove(id);
+        this._errorSources.clear();
         this._clearHoverTimeout();
         this._wallClock = null;
     }
