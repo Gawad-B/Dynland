@@ -1,5 +1,6 @@
 import {test, assert} from './harness.js';
 import {computeTimes, nextPrayer} from '../lib/prayerCalc.js';
+import {assertEqual} from './harness.js';
 
 // Reference times produced by the adhan library bundled in the
 // prayer-times@gawad-b.github.io extension (local wall-clock times).
@@ -42,4 +43,31 @@ test('nextPrayer picks the first prayer after now, skipping Sunrise', () => {
     const tomorrow = {...today, fajr: new Date(Date.UTC(2026, 0, 2, 5))};
     assert(nextPrayer(today, tomorrow, at(7)).name === 'Dhuhr', 'after sunrise should be Dhuhr');
     assert(nextPrayer(today, tomorrow, at(20)).time.getTime() === tomorrow.fajr.getTime(), 'after Isha should be tomorrow Fajr');
+});
+
+const MIDSUMMER = {year: 2026, month: 6, day: 21};
+
+test('computeTimes returns null when the sun does not rise or set (Tromso midsummer)', () => {
+    const times = computeTimes({
+        latitude: 69.65, longitude: 18.96, date: MIDSUMMER,
+        method: 'MuslimWorldLeague', madhab: 'Shafi', highLatitudeRule: 'MiddleOfTheNight',
+    });
+    assertEqual(times, null);
+});
+
+test('computeTimes at 60 N returns six valid Dates (high-latitude fallback)', () => {
+    const times = computeTimes({
+        latitude: 59.91, longitude: 10.75, date: MIDSUMMER,
+        method: 'MuslimWorldLeague', madhab: 'Shafi', highLatitudeRule: 'MiddleOfTheNight',
+    });
+    assert(times !== null, 'times computed');
+    for (const key of ['fajr', 'sunrise', 'dhuhr', 'asr', 'maghrib', 'isha'])
+        assert(!Number.isNaN(times[key].getTime()), `${key} is a valid date`);
+});
+
+test('nextPrayer returns null when today or tomorrow is missing', () => {
+    const at = h => new Date(Date.UTC(2026, 0, 1, h));
+    const today = {fajr: at(5), sunrise: at(6), dhuhr: at(12), asr: at(15), maghrib: at(18), isha: at(19)};
+    assertEqual(nextPrayer(null, today, at(7)), null);
+    assertEqual(nextPrayer(today, null, at(20)), null);
 });
