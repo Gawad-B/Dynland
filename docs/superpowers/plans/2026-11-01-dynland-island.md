@@ -22,6 +22,7 @@
 - Default shortcut `<Super>b` (`<Super>space` is GNOME's input-source switcher).
 - **Machine limits (7.4 GB RAM, `/tmp` is a RAM disk):** check `free -h` before starting a nested shell; one nested shell at a time; `.nested/` state lives on disk inside the repo, never in `/tmp`; stop the nested shell when a task's checks are done.
 - Never enable Dynland in the real session before Task 13 Step 5; all shell testing happens in `scripts/nested.sh`, whose settings are isolated from the real session.
+- Nested-shell checks are done by agents: `scripts/nested-eval.sh` (org.gnome.Shell.Eval) and `scripts/nested-shot.sh` (screenshot PNG to Read). They work because `tools/dynland-devtools@gawad-b.github.io` turns on unsafe mode; it is loaded only by `nested.sh` from `.nested/data` and must never be installed in the real session. Never kill processes by a pattern that could match the real `gnome-shell`; stop the nested shell only with `scripts/nested-stop.sh`.
 
 ## File Map
 
@@ -42,6 +43,7 @@
 | `tests/*.test.js`, `tests/harness.js`, `tests/run.js`, `tests/fakeTimers.js` | Unit tests |
 | `tests/manual/fake-mpris.js` | Fake media player for manual tests |
 | `scripts/install.sh`, `scripts/nested.sh`, `scripts/in-nested.sh` | Install link, isolated nested shell, run commands in it |
+| `scripts/nested-eval.sh`, `scripts/nested-shot.sh`, `scripts/nested-stop.sh`, `tools/dynland-devtools@gawad-b.github.io/` | Inspect, screenshot and stop the nested shell (agent verification) |
 
 Unit tests always run as `GSETTINGS_BACKEND=memory gjs -m tests/run.js` (the memory backend keeps tests away from real settings).
 
@@ -52,7 +54,8 @@ Unit tests always run as `GSETTINGS_BACKEND=memory gjs -m tests/run.js` (the mem
 **Files:**
 - Create: `metadata.json`, `schemas/org.gnome.shell.extensions.dynland.gschema.xml`, `.gitignore`
 - Create: `tests/harness.js`, `tests/run.js`
-- Create: `scripts/install.sh`, `scripts/nested.sh`, `scripts/in-nested.sh`
+- Create: `scripts/install.sh`, `scripts/nested.sh`, `scripts/in-nested.sh`, `scripts/nested-eval.sh`, `scripts/nested-shot.sh`, `scripts/nested-stop.sh`
+- Create: `tools/dynland-devtools@gawad-b.github.io/metadata.json`, `tools/dynland-devtools@gawad-b.github.io/extension.js`
 
 **Interfaces:**
 - Produces: `test(name, fn)`, `assert(cond, msg)`, `assertEqual(actual, expected, msg)`, `runAll() → Promise<number of failures>` from `tests/harness.js`; every settings key used by later tasks.
@@ -255,32 +258,46 @@ echo "Linked $target -> $root"
 # gets its own settings folder, so the real session's enabled extensions and
 # Dynland settings are never touched. Your other currently enabled extensions
 # are enabled in the nested shell too, to test them alongside the island.
+# A dev-tools extension (loaded only here, from .nested/data) turns on unsafe
+# mode so scripts/nested-eval.sh and scripts/nested-shot.sh work.
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 uuid=dynland@gawad-b.github.io
+devtools=dynland-devtools@gawad-b.github.io
 
 avail=$(free -m | awk '/^Mem:/ {print $7}')
 if (( avail < 1200 )); then
     echo "Only ${avail} MB RAM available; the nested shell needs about 1.2 GB. Close something first." >&2
     exit 1
 fi
-if pgrep -f 'gnome-shell --devkit' >/dev/null; then
+if pgrep -f '^gnome-shell --devkit' >/dev/null; then
     echo "A nested shell is already running." >&2
     exit 1
 fi
 
 host_extensions=$(gsettings get org.gnome.shell enabled-extensions)
 state="$root/.nested"            # on disk, not /tmp (RAM disk)
-mkdir -p "$state/config"
+mkdir -p "$state/config" "$state/data/gnome-shell/extensions" "$state/shots"
+ln -sfn "$root/tools/$devtools" "$state/data/gnome-shell/extensions/$devtools"
+rm -f "$state/bus"
+
 export XDG_CONFIG_HOME="$state/config"
-export DYNLAND_STATE="$state" DYNLAND_UUID="$uuid" DYNLAND_HOST_EXTENSIONS="$host_extensions"
+export XDG_DATA_DIRS="$state/data:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+export DYNLAND_STATE="$state" DYNLAND_HOST_EXTENSIONS="$host_extensions"
+export DYNLAND_EXTRA="$uuid $devtools"
 
 exec dbus-run-session -- bash -c '
     echo "$DBUS_SESSION_BUS_ADDRESS" > "$DYNLAND_STATE/bus"
-    list=$(python3 -c "import ast,os; l=ast.literal_eval(os.environ[\"DYNLAND_HOST_EXTENSIONS\"].removeprefix(\"@as \")); u=os.environ[\"DYNLAND_UUID\"]; print(repr(l + ([u] if u not in l else [])))")
+    list=$(python3 -c "
+import ast, os
+l = ast.literal_eval(os.environ[\"DYNLAND_HOST_EXTENSIONS\"].removeprefix(\"@as \"))
+for u in os.environ[\"DYNLAND_EXTRA\"].split():
+    if u not in l:
+        l.append(u)
+print(repr(l))")
     gsettings set org.gnome.shell enabled-extensions "$list"
     gsettings set org.gnome.shell disable-user-extensions false
-    gnome-shell --devkit --wayland 2>&1 | tee "$DYNLAND_STATE/shell.log"
+    gnome-shell --devkit --wayland > "$DYNLAND_STATE/shell.log" 2>&1
 '
 ```
 
@@ -292,22 +309,124 @@ exec dbus-run-session -- bash -c '
 # e.g.:  scripts/in-nested.sh notify-send "Hello" "From the island"
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
-if [[ ! -f "$root/.nested/bus" ]] || ! pgrep -f 'gnome-shell --devkit' >/dev/null; then
+if [[ ! -f "$root/.nested/bus" ]] || ! pgrep -f '^gnome-shell --devkit' >/dev/null; then
     echo "No nested shell running; start scripts/nested.sh first." >&2
     exit 1
 fi
 DBUS_SESSION_BUS_ADDRESS=$(cat "$root/.nested/bus") XDG_CONFIG_HOME="$root/.nested/config" exec "$@"
 ```
 
-- [ ] **Step 11: Make scripts executable and syntax-check them**
-
-Run: `chmod +x scripts/*.sh && for s in scripts/*.sh; do bash -n "$s"; done && echo OK`
-Expected: `OK`
-
-- [ ] **Step 12: Commit**
+- [ ] **Step 11: Create `scripts/nested-eval.sh`**
 
 ```bash
-git add metadata.json schemas .gitignore tests scripts
+#!/usr/bin/env bash
+# Evaluates JavaScript inside the nested shell and prints the result.
+#   scripts/nested-eval.sh 'Main.layoutManager.panelBox.visible'
+# Code containing "return" runs as a function body:
+#   scripts/nested-eval.sh 'const i = Main.panel; return i.visible'
+set -euo pipefail
+root=$(cd "$(dirname "$0")/.." && pwd)
+code=$1
+if [[ $code == *return* ]]; then
+    code="(() => { $code })()"
+fi
+out=$("$root/scripts/in-nested.sh" gdbus call --session --dest org.gnome.Shell \
+    --object-path /org/gnome/Shell --method org.gnome.Shell.Eval "$code")
+# gdbus prints (true, 'result') or (false, 'error')
+python3 - "$out" <<'PY'
+import ast, sys
+out = sys.argv[1].strip()
+ok = out.startswith('(true')
+result = ast.literal_eval(out[out.index(',') + 1:].rstrip(')').strip())
+print(result)
+sys.exit(0 if ok else 1)
+PY
+```
+
+- [ ] **Step 12: Create `scripts/nested-shot.sh`**
+
+```bash
+#!/usr/bin/env bash
+# Screenshots the nested shell. Prints the PNG path.
+#   scripts/nested-shot.sh island-idle
+set -euo pipefail
+root=$(cd "$(dirname "$0")/.." && pwd)
+name=${1:-shot}
+path="$root/.nested/shots/$name.png"
+"$root/scripts/in-nested.sh" gdbus call --session --dest org.gnome.Shell.Screenshot \
+    --object-path /org/gnome/Shell/Screenshot --method org.gnome.Shell.Screenshot.Screenshot \
+    false false "$path" >/dev/null
+echo "$path"
+```
+
+- [ ] **Step 13: Create `scripts/nested-stop.sh`**
+
+```bash
+#!/usr/bin/env bash
+# Stops the nested shell started by scripts/nested.sh.
+set -euo pipefail
+root=$(cd "$(dirname "$0")/.." && pwd)
+pkill -f '^gnome-shell --devkit' || true
+for _ in $(seq 20); do
+    pgrep -f '^gnome-shell --devkit' >/dev/null || break
+    sleep 0.5
+done
+rm -f "$root/.nested/bus"
+```
+
+- [ ] **Step 14: Create `tools/dynland-devtools@gawad-b.github.io/metadata.json`**
+
+```json
+{
+  "uuid": "dynland-devtools@gawad-b.github.io",
+  "name": "Dynland dev tools (nested shell only)",
+  "description": "Puts the nested test shell in unsafe mode so scripts can use org.gnome.Shell.Eval and Screenshot. Never install in a real session.",
+  "shell-version": ["50", "51"],
+  "version": 1
+}
+```
+
+- [ ] **Step 15: Create `tools/dynland-devtools@gawad-b.github.io/extension.js`**
+
+```js
+// Nested-shell-only helper: unsafe mode lets scripts/nested-eval.sh and
+// scripts/nested-shot.sh use org.gnome.Shell.Eval and Screenshot.
+
+import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
+
+export default class DevToolsExtension extends Extension {
+    enable() {
+        global.context.unsafe_mode = true;
+    }
+
+    disable() {
+        global.context.unsafe_mode = false;
+    }
+}
+```
+
+- [ ] **Step 16: Make scripts executable and syntax-check them**
+
+Run: `chmod +x scripts/*.sh && for s in scripts/*.sh; do bash -n "$s"; done && node --check tools/dynland-devtools@gawad-b.github.io/extension.js && echo OK`
+Expected: `OK`
+
+- [ ] **Step 17: Smoke-test the nested harness** (Dynland itself isn't built yet; the nested shell just shows GNOME's normal bar)
+
+```bash
+free -h
+./scripts/nested.sh &
+until scripts/nested-eval.sh 'global.context.unsafe_mode' 2>/dev/null; do sleep 1; done
+scripts/nested-eval.sh 'Object.keys(Main.panel.statusArea).join(",")'
+scripts/nested-shot.sh smoke
+scripts/nested-stop.sh
+```
+
+Expected: the loop ends within ~40 s; the eval prints a list starting with `activities,dateMenu`; the screenshot PNG (Read it) shows a normal GNOME desktop with the stock top bar; after `nested-stop.sh`, `pgrep -f '^gnome-shell --devkit'` prints nothing.
+
+- [ ] **Step 18: Commit**
+
+```bash
+git add metadata.json schemas .gitignore tests scripts tools
 git commit -m "Scaffold Dynland: metadata, settings schema, test harness, dev scripts"
 ```
 
@@ -1917,15 +2036,16 @@ Expected: nothing from `node --check`, then `29/29 passed`.
 
 - [ ] **Step 6: Start the nested shell**
 
-Run (stop any other build or nested shell first):
+Run (stop any other build or nested shell first; start `nested.sh` in the background, it runs until stopped):
 
 ```bash
 free -h
 ./scripts/install.sh
-./scripts/nested.sh
+./scripts/nested.sh &
+until scripts/nested-eval.sh 'global.context.unsafe_mode' 2>/dev/null; do sleep 1; done
 ```
 
-Expected: a nested GNOME Shell window opens. `grep -i dynland .nested/shell.log` shows no errors.
+Expected: a nested GNOME Shell window opens and the loop ends within ~40 s. `grep -i dynland .nested/shell.log` shows no errors. Verify every check below with `scripts/nested-shot.sh <name>` (then Read the PNG it prints) for anything visual, and `scripts/nested-eval.sh '<js>'` for state (e.g. `Main.layoutManager.panelBox.visible`, `global.stage.get_children()`). Hover/clicks: drive them from Eval where possible (e.g. `Main.uiGroup.get_children().find(a => a.name === 'dynlandIsland').setExpanded(true)`, `....toggleExpanded()`, `Main.panel.statusArea.quickSettings.menu.open()`); a check that truly needs a physical pointer or key (hover timing, Super+B, volume keys, unplugging) is listed in your report under "Needs a human check" instead of being skipped silently. Stop the shell with `scripts/nested-stop.sh` when done.
 
 - [ ] **Step 7: Verify the island in the nested window**
 
@@ -1946,7 +2066,7 @@ Expected: a nested GNOME Shell window opens. `grep -i dynland .nested/shell.log`
 
 If the pill isn't ~36 px tall or buttons look unpadded, change only `stylesheet.css` (`.dynland-island` padding, `.dynland-row#panel`). Reload with disable/enable in the nested shell.
 
-- [ ] **Step 9: Stop the nested shell (close its window), then commit**
+- [ ] **Step 9: Stop the nested shell (`scripts/nested-stop.sh`), then commit**
 
 ```bash
 git add island.js panelBridge.js extension.js stylesheet.css
@@ -2201,15 +2321,16 @@ Expected: `29/29 passed`
 
 - [ ] **Step 4: Start the nested shell**
 
-Run (stop any other build or nested shell first):
+Run (stop any other build or nested shell first; start `nested.sh` in the background, it runs until stopped):
 
 ```bash
 free -h
 ./scripts/install.sh
-./scripts/nested.sh
+./scripts/nested.sh &
+until scripts/nested-eval.sh 'global.context.unsafe_mode' 2>/dev/null; do sleep 1; done
 ```
 
-Expected: a nested GNOME Shell window opens. `grep -i dynland .nested/shell.log` shows no errors.
+Expected: a nested GNOME Shell window opens and the loop ends within ~40 s. `grep -i dynland .nested/shell.log` shows no errors. Verify every check below with `scripts/nested-shot.sh <name>` (then Read the PNG it prints) for anything visual, and `scripts/nested-eval.sh '<js>'` for state (e.g. `Main.layoutManager.panelBox.visible`, `global.stage.get_children()`). Hover/clicks: drive them from Eval where possible (e.g. `Main.uiGroup.get_children().find(a => a.name === 'dynlandIsland').setExpanded(true)`, `....toggleExpanded()`, `Main.panel.statusArea.quickSettings.menu.open()`); a check that truly needs a physical pointer or key (hover timing, Super+B, volume keys, unplugging) is listed in your report under "Needs a human check" instead of being skipped silently. Stop the shell with `scripts/nested-stop.sh` when done.
 
 - [ ] **Step 5: Verify in the nested window**
 
@@ -2223,7 +2344,7 @@ Expected: a nested GNOME Shell window opens. `grep -i dynland .nested/shell.log`
 8. `scripts/in-nested.sh gsettings --schemadir schemas set org.gnome.shell.extensions.dynland activity-notifications false` → GNOME's banner is back; `true` → island again.
 9. Disable/enable the extension twice; no errors in `.nested/shell.log`.
 
-- [ ] **Step 6: Stop the nested shell, then commit**
+- [ ] **Step 6: Stop the nested shell (`scripts/nested-stop.sh`), then commit**
 
 ```bash
 git add activities/notifications.js extension.js
@@ -2355,15 +2476,16 @@ Expected: `29/29 passed`
 
 - [ ] **Step 4: Start the nested shell**
 
-Run (stop any other build or nested shell first):
+Run (stop any other build or nested shell first; start `nested.sh` in the background, it runs until stopped):
 
 ```bash
 free -h
 ./scripts/install.sh
-./scripts/nested.sh
+./scripts/nested.sh &
+until scripts/nested-eval.sh 'global.context.unsafe_mode' 2>/dev/null; do sleep 1; done
 ```
 
-Expected: a nested GNOME Shell window opens. `grep -i dynland .nested/shell.log` shows no errors.
+Expected: a nested GNOME Shell window opens and the loop ends within ~40 s. `grep -i dynland .nested/shell.log` shows no errors. Verify every check below with `scripts/nested-shot.sh <name>` (then Read the PNG it prints) for anything visual, and `scripts/nested-eval.sh '<js>'` for state (e.g. `Main.layoutManager.panelBox.visible`, `global.stage.get_children()`). Hover/clicks: drive them from Eval where possible (e.g. `Main.uiGroup.get_children().find(a => a.name === 'dynlandIsland').setExpanded(true)`, `....toggleExpanded()`, `Main.panel.statusArea.quickSettings.menu.open()`); a check that truly needs a physical pointer or key (hover timing, Super+B, volume keys, unplugging) is listed in your report under "Needs a human check" instead of being skipped silently. Stop the shell with `scripts/nested-stop.sh` when done.
 
 - [ ] **Step 5: Verify in the nested window**
 
@@ -2374,7 +2496,7 @@ Expected: a nested GNOME Shell window opens. `grep -i dynland .nested/shell.log`
 5. `scripts/in-nested.sh gsettings --schemadir schemas set org.gnome.shell.extensions.dynland activity-osd false` → GNOME's popup is back; `true` → island again.
 6. Disable/enable twice; GNOME's popup works after the final disable.
 
-- [ ] **Step 6: Stop the nested shell, then commit**
+- [ ] **Step 6: Stop the nested shell (`scripts/nested-stop.sh`), then commit**
 
 ```bash
 git add activities/osd.js extension.js
@@ -2505,15 +2627,16 @@ Expected: `29/29 passed`
 
 - [ ] **Step 4: Start the nested shell**
 
-Run (stop any other build or nested shell first):
+Run (stop any other build or nested shell first; start `nested.sh` in the background, it runs until stopped):
 
 ```bash
 free -h
 ./scripts/install.sh
-./scripts/nested.sh
+./scripts/nested.sh &
+until scripts/nested-eval.sh 'global.context.unsafe_mode' 2>/dev/null; do sleep 1; done
 ```
 
-Expected: a nested GNOME Shell window opens. `grep -i dynland .nested/shell.log` shows no errors.
+Expected: a nested GNOME Shell window opens and the loop ends within ~40 s. `grep -i dynland .nested/shell.log` shows no errors. Verify every check below with `scripts/nested-shot.sh <name>` (then Read the PNG it prints) for anything visual, and `scripts/nested-eval.sh '<js>'` for state (e.g. `Main.layoutManager.panelBox.visible`, `global.stage.get_children()`). Hover/clicks: drive them from Eval where possible (e.g. `Main.uiGroup.get_children().find(a => a.name === 'dynlandIsland').setExpanded(true)`, `....toggleExpanded()`, `Main.panel.statusArea.quickSettings.menu.open()`); a check that truly needs a physical pointer or key (hover timing, Super+B, volume keys, unplugging) is listed in your report under "Needs a human check" instead of being skipped silently. Stop the shell with `scripts/nested-stop.sh` when done.
 
 - [ ] **Step 5: Verify in the nested window**
 
@@ -2523,7 +2646,7 @@ Expected: a nested GNOME Shell window opens. `grep -i dynland .nested/shell.log`
 4. `scripts/in-nested.sh gsettings --schemadir schemas set org.gnome.shell.extensions.dynland activity-power false` → unplugging shows nothing; `true` → flashes again.
 5. Without a battery (`IsPresent` false) the activity stays silent.
 
-- [ ] **Step 6: Stop the nested shell, then commit**
+- [ ] **Step 6: Stop the nested shell (`scripts/nested-stop.sh`), then commit**
 
 ```bash
 git add activities/power.js extension.js
@@ -2885,15 +3008,16 @@ Expected: `29/29 passed`
 
 - [ ] **Step 4: Start the nested shell**
 
-Run (stop any other build or nested shell first):
+Run (stop any other build or nested shell first; start `nested.sh` in the background, it runs until stopped):
 
 ```bash
 free -h
 ./scripts/install.sh
-./scripts/nested.sh
+./scripts/nested.sh &
+until scripts/nested-eval.sh 'global.context.unsafe_mode' 2>/dev/null; do sleep 1; done
 ```
 
-Expected: a nested GNOME Shell window opens. `grep -i dynland .nested/shell.log` shows no errors.
+Expected: a nested GNOME Shell window opens and the loop ends within ~40 s. `grep -i dynland .nested/shell.log` shows no errors. Verify every check below with `scripts/nested-shot.sh <name>` (then Read the PNG it prints) for anything visual, and `scripts/nested-eval.sh '<js>'` for state (e.g. `Main.layoutManager.panelBox.visible`, `global.stage.get_children()`). Hover/clicks: drive them from Eval where possible (e.g. `Main.uiGroup.get_children().find(a => a.name === 'dynlandIsland').setExpanded(true)`, `....toggleExpanded()`, `Main.panel.statusArea.quickSettings.menu.open()`); a check that truly needs a physical pointer or key (hover timing, Super+B, volume keys, unplugging) is listed in your report under "Needs a human check" instead of being skipped silently. Stop the shell with `scripts/nested-stop.sh` when done.
 
 - [ ] **Step 5: Verify in the nested window**
 
@@ -2906,7 +3030,7 @@ Expected: a nested GNOME Shell window opens. `grep -i dynland .nested/shell.log`
 7. Ctrl+C the fake player → the island goes idle.
 8. `scripts/in-nested.sh gsettings --schemadir schemas set org.gnome.shell.extensions.dynland activity-media false` → nothing for media; `true` → back.
 
-- [ ] **Step 6: Stop the nested shell, then commit**
+- [ ] **Step 6: Stop the nested shell (`scripts/nested-stop.sh`), then commit**
 
 ```bash
 git add activities/media.js extension.js tests/manual/fake-mpris.js
@@ -3074,15 +3198,16 @@ Expected: `29/29 passed`
 
 - [ ] **Step 4: Start the nested shell**
 
-Run (stop any other build or nested shell first):
+Run (stop any other build or nested shell first; start `nested.sh` in the background, it runs until stopped):
 
 ```bash
 free -h
 ./scripts/install.sh
-./scripts/nested.sh
+./scripts/nested.sh &
+until scripts/nested-eval.sh 'global.context.unsafe_mode' 2>/dev/null; do sleep 1; done
 ```
 
-Expected: a nested GNOME Shell window opens. `grep -i dynland .nested/shell.log` shows no errors.
+Expected: a nested GNOME Shell window opens and the loop ends within ~40 s. `grep -i dynland .nested/shell.log` shows no errors. Verify every check below with `scripts/nested-shot.sh <name>` (then Read the PNG it prints) for anything visual, and `scripts/nested-eval.sh '<js>'` for state (e.g. `Main.layoutManager.panelBox.visible`, `global.stage.get_children()`). Hover/clicks: drive them from Eval where possible (e.g. `Main.uiGroup.get_children().find(a => a.name === 'dynlandIsland').setExpanded(true)`, `....toggleExpanded()`, `Main.panel.statusArea.quickSettings.menu.open()`); a check that truly needs a physical pointer or key (hover timing, Super+B, volume keys, unplugging) is listed in your report under "Needs a human check" instead of being skipped silently. Stop the shell with `scripts/nested-stop.sh` when done.
 
 - [ ] **Step 5: Verify in the nested window**
 
@@ -3093,7 +3218,7 @@ Expected: a nested GNOME Shell window opens. `grep -i dynland .nested/shell.log`
 5. `scripts/in-nested.sh gsettings --schemadir schemas set org.gnome.shell.extensions.dynland prayer-lead-minutes 120` → if a real prayer is within 2 hours, its countdown shows; set back to `15`.
 6. `scripts/in-nested.sh gsettings --schemadir schemas set org.gnome.shell.extensions.dynland activity-prayer false` → countdown gone; `true` → back.
 
-- [ ] **Step 6: Stop the nested shell, then commit**
+- [ ] **Step 6: Stop the nested shell (`scripts/nested-stop.sh`), then commit**
 
 ```bash
 git add activities/prayer.js extension.js
@@ -3269,7 +3394,7 @@ Expected: `ok`
 5. Shortcut `<Super>n` + apply → Super+N toggles the island; `nonsense` + apply → the row turns red and the setting is unchanged. Reset to `<Super>b`.
 6. Compatibility shows "No conflicts found". Then `scripts/in-nested.sh gsettings --schemadir ~/.local/share/gnome-shell/extensions/just-perfection-desktop@just-perfection/schemas set org.gnome.shell.extensions.just-perfection panel false`, reopen prefs → the warning row appears. Reset it to `true`.
 
-- [ ] **Step 4: Stop the nested shell, then commit**
+- [ ] **Step 4: Stop the nested shell (`scripts/nested-stop.sh`), then commit**
 
 ```bash
 git add prefs.js
@@ -3334,8 +3459,8 @@ This changes their desktop; do it only after they say yes:
 gnome-extensions enable dynland@gawad-b.github.io
 ```
 
-On Wayland a newly installed extension loads after logging out and back in. Then confirm the island replaced the bar and `journalctl --user -b -g dynland` shows no errors. To back out at any time: `gnome-extensions disable dynland@gawad-b.github.io`.
+On Wayland a newly installed extension loads after logging out and back in. Then confirm the island replaced the bar and `journalctl --user -b -g -i dynland` shows no errors. To back out at any time: `gnome-extensions disable dynland@gawad-b.github.io`.
 
 - [ ] **Step 6: Clean up**
 
-Close any nested shell, then delete the `.nested/` folder (it holds only the nested shell's throwaway settings and log).
+Stop any nested shell with `scripts/nested-stop.sh`, then delete the `.nested/` folder (it holds only the nested shell's throwaway settings and log).
