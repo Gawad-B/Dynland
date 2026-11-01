@@ -16,7 +16,7 @@ import {ActivityManager} from './lib/activityManager.js';
 const ACTIVITIES = {
 };
 
-// Idle pill (36px) + top margin (6px) + gap (6px).
+// Idle pill (36px) + top margin (6px) + gap (6px), in logical pixels.
 const STRUT_HEIGHT = 48;
 
 export default class DynlandExtension extends Extension {
@@ -48,12 +48,19 @@ export default class DynlandExtension extends Extension {
             this._heldId = held ? id : null;
         });
 
-        Main.layoutManager.addTopChrome(this._island, {affectsStruts: false, trackFullscreen: true});
-        this._bridge.enable(this._island);
+        try {
+            this._bridge.enable(this._island);
+        } catch (e) {
+            this._island.destroy();
+            throw e;
+        }
+        Main.layoutManager.addChrome(this._island, {affectsStruts: false, trackFullscreen: true});
 
         this._updateStrut();
         this._settings.connectObject('changed::reserve-space', () => this._updateStrut(), this);
         Main.layoutManager.connectObject('monitors-changed', () => this._updateStrut(), this);
+        St.ThemeContext.get_for_stage(global.stage).connectObject(
+            'notify::scale-factor', () => this._updateStrut(), this);
 
         for (const key of Object.keys(ACTIVITIES)) {
             this._syncActivity(key);
@@ -70,6 +77,7 @@ export default class DynlandExtension extends Extension {
         Main.wm.removeKeybinding('toggle-shortcut');
         this._settings.disconnectObject(this);
         Main.layoutManager.disconnectObject(this);
+        St.ThemeContext.get_for_stage(global.stage).disconnectObject(this);
 
         for (const activity of this._activities.values())
             this._safeDisable(activity);
@@ -149,10 +157,10 @@ export default class DynlandExtension extends Extension {
             x: monitor.x,
             y: monitor.y,
             width: monitor.width,
-            height: STRUT_HEIGHT,
+            height: STRUT_HEIGHT * St.ThemeContext.get_for_stage(global.stage).scale_factor,
             reactive: false,
         });
-        Main.layoutManager.addTopChrome(this._strut, {affectsStruts: true, trackFullscreen: true});
+        Main.layoutManager.addChrome(this._strut, {affectsStruts: true, trackFullscreen: true});
     }
 
     _removeStrut() {

@@ -24,6 +24,8 @@ if pgrep -f '^gnome-shell --devkit' >/dev/null; then
     exit 1
 fi
 
+glib-compile-schemas --strict "$root/schemas"
+
 host_extensions=$(gsettings get org.gnome.shell enabled-extensions)
 real_extensions="${XDG_DATA_HOME:-$HOME/.local/share}/gnome-shell/extensions"  # read before XDG_DATA_HOME is changed
 state="$root/.nested"            # on disk, not /tmp (RAM disk)

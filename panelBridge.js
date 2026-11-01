@@ -20,6 +20,8 @@ export class PanelBridge {
         this._island = null;
         this._borrowed = [];
         this._refreshId = 0;
+        this._wasVisible = true;
+        this._addToPanelBoxDescriptor = null;
     }
 
     /** @param {Island} island */
@@ -30,10 +32,17 @@ export class PanelBridge {
             throw new Error('Dynland: this GNOME Shell version has an unsupported panel layout');
 
         this._island = island;
-        Main.layoutManager.panelBox.hide();
+
+        // GNOME re-shows tracked chrome on overview/session/monitor changes
+        // and keeps a hidden box's strut, so stop tracking it while hidden.
+        const panelBox = Main.layoutManager.panelBox;
+        this._wasVisible = panelBox.visible;
+        Main.layoutManager.untrackChrome(panelBox);
+        panelBox.hide();
 
         // Indicators added later (another extension enabling) trigger a re-layout.
-        const addToPanelBox = Object.getPrototypeOf(panel)._addToPanelBox;
+        this._addToPanelBoxDescriptor = Object.getOwnPropertyDescriptor(panel, '_addToPanelBox') ?? null;
+        const addToPanelBox = panel._addToPanelBox;
         panel._addToPanelBox = (...args) => {
             addToPanelBox.apply(panel, args);
             this._scheduleRefresh();
@@ -51,9 +60,15 @@ export class PanelBridge {
             this._refreshId = 0;
         }
         this._settings.disconnectObject(this);
-        delete Main.panel._addToPanelBox;
+        if (this._addToPanelBoxDescriptor)
+            Object.defineProperty(Main.panel, '_addToPanelBox', this._addToPanelBoxDescriptor);
+        else
+            delete Main.panel._addToPanelBox;
+        this._addToPanelBoxDescriptor = null;
         this._restoreAll();
-        Main.layoutManager.panelBox.show();
+        const panelBox = Main.layoutManager.panelBox;
+        Main.layoutManager.trackChrome(panelBox, {affectsStruts: true, trackFullscreen: true});
+        panelBox.visible = this._wasVisible;
         this._island = null;
     }
 
@@ -93,11 +108,23 @@ export class PanelBridge {
     _scheduleRefresh() {
         if (this._refreshId)
             return;
-        this._refreshId = GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+        this._queueRefresh();
+    }
+
+    // Restoring containers unmaps them and closes their menus, so wait
+    // until no borrowed menu is open.
+    _queueRefresh() {
+        const run = () => {
             this._refreshId = 0;
-            this.refresh();
+            if (this.anyMenuOpen())
+                this._queueRefresh();
+            else
+                this.refresh();
             return GLib.SOURCE_REMOVE;
-        });
+        };
+        this._refreshId = this.anyMenuOpen()
+            ? GLib.timeout_add(GLib.PRIORITY_DEFAULT, 500, run)
+            : GLib.idle_add(GLib.PRIORITY_DEFAULT, run);
     }
 
     _borrow(role, target) {
@@ -110,6 +137,14 @@ export class PanelBridge {
         target.add_child(container);
         this._borrowed.push({indicator, container, parent, index});
 
+        // GNOME blocks banners while the calendar is open by finding the date
+        // menu in the panel's centre box; once lent out, do it here.
+        if (role === 'dateMenu' && indicator.menu && 'bannerBlocked' in Main.messageTray) {
+            indicator.menu.connectObject('open-state-changed', (_menu, isOpen) => {
+                Main.messageTray.bannerBlocked = isOpen;
+            }, this);
+        }
+
         indicator.connectObject('destroy', () => {
             this._borrowed = this._borrowed.filter(b => b.indicator !== indicator);
         }, this);
@@ -119,6 +154,9 @@ export class PanelBridge {
     _restoreAll() {
         for (const {indicator, container, parent, index} of this._borrowed.reverse()) {
             indicator.disconnectObject(this);
+            if (indicator.menu && Main.messageTray.bannerBlocked && indicator === Main.panel.statusArea.dateMenu)
+                Main.messageTray.bannerBlocked = false;
+            indicator.menu?.disconnectObject(this);
             container.get_parent()?.remove_child(container);
             parent.insert_child_at_index(container, Math.min(index, parent.get_n_children()));
         }

@@ -101,6 +101,8 @@ export const Island = GObject.registerClass({
         this.connect('notify::hover', () => this._onHover());
         this.connect('notify::width', () => this._reposition());
         Main.layoutManager.connectObject('monitors-changed', () => this._reposition(), this);
+        St.ThemeContext.get_for_stage(global.stage).connectObject(
+            'notify::scale-factor', () => this._reposition(), this);
         settings.connectObject('changed::style', () => this._updateStyle(), this);
         this._updateStyle();
 
@@ -165,7 +167,9 @@ export const Island = GObject.registerClass({
         if (this.hover && !this._expanded) {
             this._hoverTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, HOVER_EXPAND_MS, () => {
                 this._hoverTimeoutId = 0;
-                this.setExpanded(true);
+                // A click that opened a menu must not make its indicator slide away.
+                if (!this._anyMenuOpen())
+                    this.setExpanded(true);
                 return GLib.SOURCE_REMOVE;
             });
         } else if (!this.hover && this._expanded) {
@@ -248,7 +252,7 @@ export const Island = GObject.registerClass({
             return;
         this.set_position(
             Math.floor(monitor.x + (monitor.width - this.width) / 2),
-            monitor.y + TOP_MARGIN);
+            monitor.y + TOP_MARGIN * St.ThemeContext.get_for_stage(global.stage).scale_factor);
     }
 
     _updateDate() {
