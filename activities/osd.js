@@ -69,6 +69,9 @@ export class OsdActivity {
     // Returns true when the island showed it; false falls back to GNOME's popup.
     _handle(icon, levels) {
         return this._manager.guard(ID, () => {
+            // The island is hidden in fullscreen; let GNOME's popup show.
+            if (Main.layoutManager.primaryMonitor?.inFullscreen)
+                return false;
             const name = icon instanceof Gio.ThemedIcon ? icon.get_names()[0] : '';
             if (!HANDLED_ICONS.test(name) || levels?.level === undefined || levels.level === null)
                 return false;
@@ -82,6 +85,12 @@ export class OsdActivity {
                 compact: () => this._actor(icon, ratio, percent),
                 timeoutMs: TIMEOUT_MS,
             });
+            // A higher-priority activity (a notification) is on screen:
+            // withdraw ours and let GNOME's popup show instead.
+            if (this._manager.current?.id !== ID) {
+                this._manager.release(ID);
+                return false;
+            }
             return true;
         })() ?? false;
     }
