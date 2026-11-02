@@ -6,7 +6,7 @@ import Gio from 'gi://Gio';
 import St from 'gi://St';
 import UPower from 'gi://UPowerGlib';
 
-import {loadInterfaceXML} from 'resource:///org/gnome/shell/misc/fileUtils.js';
+import * as FileUtils from 'resource:///org/gnome/shell/misc/fileUtils.js';
 
 import {Priority} from '../lib/activityManager.js';
 
@@ -18,7 +18,10 @@ const STATUS_WORDS = {
     unplugged: 'Unplugged',
     low: 'Low battery',
 };
-const DeviceProxy = Gio.DBusProxy.makeProxyWrapper(loadInterfaceXML('org.freedesktop.UPower.Device'));
+
+// Built on first enable (not at import), so a GNOME without loadInterfaceXML
+// only loses this activity instead of the whole extension.
+let DeviceProxy = null;
 
 // true: on the charger, false: running on battery, null: unknown (ignored).
 const isCharging = state => {
@@ -39,6 +42,12 @@ const isCharging = state => {
 export class PowerActivity {
     enable(manager) {
         this._manager = manager;
+        if (!DeviceProxy) {
+            if (typeof FileUtils.loadInterfaceXML !== 'function')
+                throw new Error('unsupported GNOME Shell (no loadInterfaceXML)');
+            DeviceProxy = Gio.DBusProxy.makeProxyWrapper(
+                FileUtils.loadInterfaceXML('org.freedesktop.UPower.Device'));
+        }
         this._warned = new Set();
         this._wasCharging = null;
         this._proxy = new DeviceProxy(Gio.DBus.system,
