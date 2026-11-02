@@ -132,8 +132,14 @@ export const Bubble = GObject.registerClass({
         }
         this.opacity = 0;
         this.set_scale(POP_SCALE, POP_SCALE);
+        // Opacity must not use EASE_OUT_BACK: its overshoot goes past 255,
+        // which wraps to nearly transparent and flashes the bubble.
         this.ease({
             opacity: 255,
+            duration: POP_IN_MS,
+            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+        });
+        this.ease({
             scale_x: 1,
             scale_y: 1,
             duration: POP_IN_MS,
