@@ -3,9 +3,10 @@
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import Pango from 'gi://Pango';
 import St from 'gi://St';
 
-import {MprisSource} from 'resource:///org/gnome/shell/ui/mpris.js';
+import * as Mpris from 'resource:///org/gnome/shell/ui/mpris.js';
 
 import {Priority} from '../lib/activityManager.js';
 
@@ -15,6 +16,19 @@ const BARS_INTERVAL_MS = 180;
 const PROGRESS_INTERVAL_MS = 1000;
 const BAR_COUNT = 3;
 const BAR_REST_HEIGHTS = [6, 10, 6];
+
+// GNOME's MprisSource cannot be torn down (it owns a D-Bus name watch for
+// good), so one is created on first use and shared by every enable().
+let sharedSource = null;
+
+function getSource() {
+    if (!sharedSource) {
+        if (typeof Mpris.MprisSource !== 'function')
+            throw new Error('unsupported GNOME Shell (no MprisSource)');
+        sharedSource = new Mpris.MprisSource();
+    }
+    return sharedSource;
+}
 
 function formatTime(us) {
     const seconds = Math.max(0, Math.floor(us / 1e6));
@@ -29,8 +43,9 @@ export class MediaActivity {
         this._players = new Set();
         this._playingSince = new Map();
         this._player = null;
+        this._requested = null;
 
-        this._source = new MprisSource();
+        this._source = getSource();
         this._source.connectObject(
             'player-added', (_source, player) => this._addPlayer(player),
             'player-removed', (_source, player) => this._removePlayer(player),
@@ -48,6 +63,7 @@ export class MediaActivity {
         this._playingSince?.clear();
         this._source = null;
         this._player = null;
+        this._requested = null;
         this._interface = null;
         this._manager?.release(ID);
     }
@@ -64,6 +80,7 @@ export class MediaActivity {
         this._playingSince.delete(player);
         if (this._player === player) {
             this._player = null;
+            this._requested = null;
             this._manager.release(ID);
         }
         this._update();
@@ -90,11 +107,23 @@ export class MediaActivity {
             return;
 
         const player = this._player;
+
+        // 'changed' also fires for position and volume updates: only rebuild
+        // the card when something it shows changed.
+        const signature = JSON.stringify([
+            player.status, player.trackTitle, player.trackArtists, player.trackCoverUrl,
+            player.canPlay, player.canGoNext, player.canGoPrevious,
+        ]);
+        if (this._requested?.player === player && this._requested.signature === signature)
+            return;
+        this._requested = {player, signature};
+
         this._manager.request(ID, Priority.MEDIA, {
             compact: () => this._compact(player),
             expanded: () => this._expanded(player),
             timeoutMs: player.status === 'Playing' ? 0 : PAUSED_LINGER_MS,
             onEnd: () => {
+                this._requested = null;
                 if (this._player === player)
                     this._player = null;
             },
@@ -224,8 +253,14 @@ export class MediaActivity {
             x_expand: true,
             y_align: Clutter.ActorAlign.CENTER,
         });
-        text.add_child(new St.Label({text: player.trackTitle || '', style_class: 'dynland-media-title'}));
-        text.add_child(new St.Label({text: player.trackArtists.join(', '), style_class: 'dynland-media-artist'}));
+        for (const [value, styleClass] of [
+            [player.trackTitle || '', 'dynland-media-title'],
+            [player.trackArtists.join(', '), 'dynland-media-artist'],
+        ]) {
+            const label = new St.Label({text: value, style_class: styleClass});
+            label.clutter_text.ellipsize = Pango.EllipsizeMode.END;
+            text.add_child(label);
+        }
         top.add_child(text);
         top.add_child(this._equalizer(player));
         card.add_child(top);
