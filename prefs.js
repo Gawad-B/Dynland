@@ -20,6 +20,12 @@ function switchRow(settings, key, title, subtitle = '') {
     return row;
 }
 
+// A usable accelerator has a key and at least one modifier; a bare key would be grabbed globally.
+export function isValidShortcut(text) {
+    const [ok, key, mods] = Gtk.accelerator_parse(text);
+    return ok && key !== 0 && mods !== 0;
+}
+
 function group(title, rows, description = '') {
     const g = new Adw.PreferencesGroup({title, description});
     for (const row of rows)
@@ -104,9 +110,9 @@ export default class DynlandPreferences extends ExtensionPreferences {
             show_apply_button: true,
         });
         shortcut.connect('apply', () => {
-            const [ok] = Gtk.accelerator_parse(shortcut.text);
-            if (ok)
-                settings.set_strv('toggle-shortcut', [shortcut.text]);
+            const text = shortcut.text.trim();
+            if (isValidShortcut(text))
+                settings.set_strv('toggle-shortcut', [text]);
             else
                 shortcut.add_css_class('error');
         });
