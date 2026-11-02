@@ -96,7 +96,7 @@ the error with `console.error`, and the island carries on.
 ### Expanded
 
 - Triggered by hovering about 300 ms, clicking an empty area of the pill, or the
-  `toggle-shortcut` key (default `<Super>b`; `<Super>space` is GNOME's input-source switcher).
+  `dynland-toggle` key (default `<Super>b`; `<Super>space` is GNOME's input-source switcher).
 - About 640 px wide, two rows:
   - Row 1: Activities button (workspace dots), the clock, and the full date.
   - Row 2: every other indicator (Vitals, tray icons, clipboard, caffeine, prayer-times, …).
@@ -156,7 +156,7 @@ are off.
 | `style` | s | `'solid'` (`'solid'` or `'blur'`) |
 | `reduce-motion` | b | false |
 | `prayer-lead-minutes` | i | 15 |
-| `toggle-shortcut` | as | `['<Super>b']` |
+| `dynland-toggle` | as | `['<Super>b']` |
 | `debug-fake-prayer-minutes` | i | -1 (testing only, not in prefs: pretend the next prayer is N minutes after enable) |
 
 When an activity is turned off, GNOME's default behaviour comes back: notifications use

@@ -70,7 +70,7 @@
       <default>false</default>
       <summary>Turn off morph animations</summary>
     </key>
-    <key name="toggle-shortcut" type="as">
+    <key name="dynland-toggle" type="as">
       <default><![CDATA[['<Super>b']]]></default>
       <summary>Shortcut to expand or collapse the island</summary>
     </key>

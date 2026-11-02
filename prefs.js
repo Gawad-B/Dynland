@@ -106,13 +106,13 @@ export default class DynlandPreferences extends ExtensionPreferences {
 
         const shortcut = new Adw.EntryRow({
             title: 'Expand / collapse shortcut',
-            text: settings.get_strv('toggle-shortcut')[0] ?? '',
+            text: settings.get_strv('dynland-toggle')[0] ?? '',
             show_apply_button: true,
         });
         shortcut.connect('apply', () => {
             const text = shortcut.text.trim();
             if (isValidShortcut(text))
-                settings.set_strv('toggle-shortcut', [text]);
+                settings.set_strv('dynland-toggle', [text]);
             else
                 shortcut.add_css_class('error');
         });

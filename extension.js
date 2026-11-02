@@ -26,6 +26,9 @@ const ACTIVITIES = {
     'activity-prayer': [Prayer.ID, Prayer.PrayerActivity],
 };
 
+// Mutter keybinding names are global, so keep ours distinctive.
+const KEYBINDING = 'dynland-toggle';
+
 // Idle pill (36px) + top margin (6px) + gap (6px), in logical pixels.
 const STRUT_HEIGHT = 48;
 
@@ -82,17 +85,21 @@ export default class DynlandExtension extends Extension {
             this._settings.connectObject(`changed::${key}`, () => this._syncActivity(key), this);
         }
 
-        Main.wm.addKeybinding('toggle-shortcut', this._settings,
+        const action = Main.wm.addKeybinding(KEYBINDING, this._settings,
             Meta.KeyBindingFlags.NONE,
             Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW,
             () => this._island.toggleExpanded());
-        this._keybound = true;
+        // Keybinding names are global: on a clash NONE comes back and the
+        // other owner's binding must not be removed by us.
+        this._keybound = action !== Meta.KeyBindingAction.NONE;
+        if (!this._keybound)
+            console.warn(`Dynland: could not register the "${KEYBINDING}" shortcut`);
     }
 
     // Tolerates any partially initialised state (also called after a failed enable()).
     disable() {
         if (this._keybound) {
-            Main.wm.removeKeybinding('toggle-shortcut');
+            Main.wm.removeKeybinding(KEYBINDING);
             this._keybound = false;
         }
         this._settings?.disconnectObject(this);
@@ -163,6 +170,8 @@ export default class DynlandExtension extends Extension {
 
     // An activity that throws is turned off for this session; its setting is untouched.
     _onActivityError(id, error) {
+        if (!this._activities)
+            return;
         console.error(`Dynland: activity "${id}" failed and was turned off`, error);
         const key = Object.keys(ACTIVITIES).find(k => ACTIVITIES[k][0] === id);
         const activity = key && this._activities.get(key);
