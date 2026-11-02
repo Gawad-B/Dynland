@@ -15,6 +15,7 @@ import * as Media from './activities/media.js';
 import * as Notifications from './activities/notifications.js';
 import * as Osd from './activities/osd.js';
 import * as Power from './activities/power.js';
+import * as Prayer from './activities/prayer.js';
 
 // Settings key → [activity id, activity class]
 const ACTIVITIES = {
@@ -22,6 +23,7 @@ const ACTIVITIES = {
     'activity-media': [Media.ID, Media.MediaActivity],
     'activity-osd': [Osd.ID, Osd.OsdActivity],
     'activity-power': [Power.ID, Power.PowerActivity],
+    'activity-prayer': [Prayer.ID, Prayer.PrayerActivity],
 };
 
 // Idle pill (36px) + top margin (6px) + gap (6px), in logical pixels.
