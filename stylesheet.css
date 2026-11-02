@@ -120,3 +120,12 @@
 /* Volume and brightness */
 .dynland-osd { spacing: 10px; }
 .dynland-level-label { min-width: 24px; text-align: right; font-weight: bold; }
+
+/* Charging and low battery */
+.dynland-power { spacing: 8px; }
+.dynland-power-percent { font-weight: bold; }
+.dynland-power-status { color: rgba(255, 255, 255, 0.8); }
+.dynland-power-charging .dynland-power-status { color: #57e389; }
+.dynland-power-charging StIcon { color: #57e389; }
+.dynland-power-low .dynland-power-status { color: #ff7b63; }
+.dynland-power-low StIcon { color: #ff7b63; }
