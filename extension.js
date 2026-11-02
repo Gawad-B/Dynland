@@ -30,6 +30,9 @@ const ACTIVITIES = {
 // Mutter keybinding names are global, so keep ours distinctive.
 const KEYBINDING = 'dynland-toggle';
 
+// At most this many activities show at once, each in its own bubble.
+const MAX_BUBBLES = 2;
+
 // Idle pill (36px) + top margin (6px) + gap (6px), in logical pixels.
 const STRUT_HEIGHT = 48;
 
@@ -47,15 +50,17 @@ export default class DynlandExtension extends Extension {
     _enable() {
         this._settings = this.getSettings();
         this._activities = new Map();
-        this._heldId = null;
 
         this._bridge = new PanelBridge(this._settings);
         this._island = new Island(this._settings, {
             anyMenuOpen: () => this._bridge.anyMenuOpen(),
         });
-        this._bubble = new Bubble(this._settings, this._island, {
-            onActivityError: (id, error) => this._onActivityError(id, error),
-        });
+        this._bubbles = [];
+        for (let i = 0; i < MAX_BUBBLES; i++) {
+            this._bubbles.push(new Bubble(this._settings, this._island, this._bubbles.at(-1) ?? null, {
+                onActivityError: (id, error) => this._onActivityError(id, error),
+            }));
+        }
         this._corner = new Corner(this._settings);
         this._manager = new ActivityManager({
             setTimeout: (fn, ms) => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => {
@@ -63,22 +68,21 @@ export default class DynlandExtension extends Extension {
                 return GLib.SOURCE_REMOVE;
             }),
             clearTimeout: id => GLib.source_remove(id),
-            onChange: current => this._onActivityChange(current),
+            onChange: () => {},
+            onActiveChange: active => this._onActiveChange(active),
             onError: (id, error) => this._onActivityError(id, error),
         });
 
-        this._bubble.connect('activity-hover', (_bubble, held) => {
-            const id = this._manager.current?.id;
-            if (!id)
-                return;
-            this._manager.hold(id, held);
-            this._heldId = held ? id : null;
-        });
+        for (const bubble of this._bubbles)
+            bubble.connect('activity-hover', (_bubble, id, held) => this._manager.hold(id, held));
 
         // On the stage before indicators move in, so they never lay out off-stage.
-        // The bubble goes on top: its opened card can reach over the corner pill.
-        for (const actor of [this._island, this._corner, this._bubble])
-            Main.layoutManager.addChrome(actor, {affectsStruts: false, trackFullscreen: true});
+        // The bubbles go on top: an opened card can reach over the corner pill.
+        // The corner and bubbles hide themselves, so they follow fullscreen on
+        // their own (GNOME's tracking would show them again).
+        Main.layoutManager.addChrome(this._island, {affectsStruts: false, trackFullscreen: true});
+        for (const actor of [this._corner, ...this._bubbles])
+            Main.layoutManager.addChrome(actor, {affectsStruts: false, trackFullscreen: false});
         this._bridge.enable(name => name === 'corner' ? this._corner.slot() : this._island.slot(name));
 
         this._updateStrut();
@@ -120,7 +124,7 @@ export default class DynlandExtension extends Extension {
 
         // Off the stage first: a relayout queued while indicators leave would
         // otherwise run on actors that are already gone.
-        const actors = [this._bubble, this._corner, this._island].filter(Boolean);
+        const actors = [...this._bubbles ?? [], this._corner, this._island].filter(Boolean);
         for (const actor of actors) {
             if (actor.get_parent())
                 Main.layoutManager.removeChrome(actor);
@@ -137,7 +141,7 @@ export default class DynlandExtension extends Extension {
             actor.destroy();
 
         this._island = null;
-        this._bubble = null;
+        this._bubbles = null;
         this._corner = null;
         this._bridge = null;
         this._manager = null;
@@ -173,12 +177,25 @@ export default class DynlandExtension extends Extension {
         }
     }
 
-    _onActivityChange(current) {
-        if (this._heldId && this._heldId !== current?.id) {
-            this._manager.hold(this._heldId, false);
-            this._heldId = null;
+    // An activity keeps its bubble while it lasts; a new one takes a free
+    // bubble. With two showing, the island shrinks to the clock to make room.
+    _onActiveChange(active) {
+        const shown = active.slice(0, MAX_BUBBLES);
+        const free = [];
+        for (const bubble of this._bubbles) {
+            const activity = shown.find(a => a.id === bubble.activity?.id);
+            if (!activity)
+                free.push(bubble);
+            else if (activity.content !== bubble.activity.content)
+                bubble.setActivity(activity);
         }
-        this._bubble.setActivity(current);
+        for (const activity of shown) {
+            if (!this._bubbles.some(b => b.activity?.id === activity.id))
+                free.shift().setActivity(activity);
+        }
+        for (const bubble of free)
+            bubble.setActivity(null);
+        this._island.setCompact(shown.length > 1);
     }
 
     // An activity that throws is turned off for this session; its setting is untouched.

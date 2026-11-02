@@ -27,6 +27,27 @@ export function motionAllowed(settings) {
 }
 
 /**
+ * Shows `actor` while `wanted()` is true, except over a fullscreen window.
+ * GNOME's own fullscreen tracking (addChrome's trackFullscreen) would set
+ * `visible` back to true on every fullscreen or overview change, showing an
+ * actor that hid itself, so actors that hide use this instead.
+ *
+ * @returns {() => void} call after `wanted()` changes
+ */
+export function followFullscreen(actor, wanted) {
+    const sync = () => {
+        const monitor = Main.layoutManager.primaryMonitor;
+        const fullscreen = global.window_group.visible && !!monitor?.inFullscreen;
+        actor.visible = wanted() && !fullscreen;
+    };
+    // Connected after LayoutManager's handlers, so inFullscreen is already up to date.
+    global.display.connectObject('in-fullscreen-changed', sync, actor);
+    Main.overview.connectObject('showing', sync, 'hidden', sync, actor);
+    Main.layoutManager.connectObject('monitors-changed', sync, actor);
+    return sync;
+}
+
+/**
  * Keeps an actor's `dynland-translucent` class in step with the `style` setting.
  * GNOME's blur effect is always a square, so the translucent style has no blur.
  */

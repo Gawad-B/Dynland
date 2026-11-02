@@ -126,3 +126,19 @@ test('clear drops everything without onEnd', () => {
     assertEqual(manager.current, null);
     assertEqual(ended, 0);
 });
+
+test('active lists every live activity, most important first, on every change', () => {
+    const timers = new FakeTimers();
+    const lists = [];
+    const manager = new ActivityManager({
+        setTimeout: timers.setTimeout,
+        clearTimeout: timers.clearTimeout,
+        onChange: () => {},
+        onActiveChange: active => lists.push(active.map(a => a.id)),
+    });
+    manager.request('media', Priority.MEDIA, content());
+    manager.request('notification', Priority.NOTIFICATION, content());
+    manager.request('media', Priority.MEDIA, content());
+    manager.release('notification');
+    assertEqual(lists, [['media'], ['notification', 'media'], ['notification', 'media'], ['media']]);
+});

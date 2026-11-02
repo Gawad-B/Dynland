@@ -9,7 +9,7 @@ import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {MorphBox, TOP_MARGIN, followStyle, scaleFactor} from './morphBox.js';
+import {MorphBox, TOP_MARGIN, followFullscreen, followStyle, scaleFactor} from './morphBox.js';
 
 const HOVER_EXPAND_MS = 120;
 const LEAVE_COLLAPSE_MS = 350;
@@ -31,12 +31,14 @@ class Island extends MorphBox {
         this._anyMenuOpen = anyMenuOpen;
         this._expanded = false;
         this._page = HOME;
+        this._compact = false;
         this._hoverTimeoutId = 0;
         this._scrollCooldownId = 0;
 
         this._slots = {
             left: new St.BoxLayout({style_class: 'dynland-slot'}),
             center: new St.BoxLayout({style_class: 'dynland-slot'}),
+            idle: new St.BoxLayout({style_class: 'dynland-slot'}),
             home: new St.BoxLayout({style_class: 'dynland-slot', visible: false}),
             more: new St.BoxLayout({style_class: 'dynland-slot'}),
         };
@@ -50,6 +52,7 @@ class Island extends MorphBox {
         });
         this._homeRow.add_child(this._slots.left);
         this._homeRow.add_child(this._slots.center);
+        this._homeRow.add_child(this._slots.idle);
         this._homeRow.add_child(this._slots.home);
 
         this._moreRow = new St.BoxLayout({
@@ -76,8 +79,9 @@ class Island extends MorphBox {
         this.add_child(this._dots);
         this._initContainers();
 
-        // A page losing or gaining its last indicator changes what is shown.
-        for (const slot of [this._slots.home, this._slots.more]) {
+        // A slot losing or gaining its last indicator changes what is shown;
+        // an empty slot is hidden so the row adds no spacing for it.
+        for (const slot of Object.values(this._slots)) {
             slot.connectObject(
                 'child-added', () => this._render(),
                 'child-removed', () => this._render(), this);
@@ -98,7 +102,7 @@ class Island extends MorphBox {
         this._render();
     }
 
-    /** @param {'left'|'center'|'home'|'more'} name */
+    /** @param {'left'|'center'|'idle'|'home'|'more'} name */
     slot(name) {
         return this._slots[name];
     }
@@ -117,6 +121,17 @@ class Island extends MorphBox {
 
     toggleExpanded() {
         this.setExpanded(!this._expanded);
+    }
+
+    /**
+     * Compact: the idle pill shrinks to just the clock, making room while
+     * two activity bubbles sit beside it.
+     */
+    setCompact(compact) {
+        if (this._compact === compact)
+            return;
+        this._compact = compact;
+        this._render();
     }
 
     vfunc_scroll_event(event) {
@@ -208,14 +223,18 @@ class Island extends MorphBox {
 
     _stateKey() {
         if (!this._expanded)
-            return 'idle';
+            return this._compact ? 'compact' : 'idle';
         return this._onMorePage() ? 'more' : 'home';
     }
 
     _applyContent() {
         const more = this._onMorePage();
+        const filled = slot => slot.get_n_children() > 0;
         this._homeRow.visible = !more;
-        this._slots.home.visible = this._expanded;
+        this._slots.left.visible = filled(this._slots.left);
+        this._slots.center.visible = filled(this._slots.center);
+        this._slots.idle.visible = filled(this._slots.idle) && (this._expanded || !this._compact);
+        this._slots.home.visible = this._expanded && filled(this._slots.home);
         this._moreRow.visible = more;
         this._dots.visible = this._expanded && this._hasMore();
         this._dots.get_children().forEach((dot, page) => {
@@ -244,6 +263,7 @@ class Corner extends St.BoxLayout {
         this.add_child(this._slot);
 
         followStyle(this, settings);
+        this._syncVisible = followFullscreen(this, () => this._slot.get_n_children() > 0);
         this._slot.connectObject(
             'child-added', () => this._sync(),
             'child-removed', () => this._sync(), this);
@@ -259,7 +279,7 @@ class Corner extends St.BoxLayout {
     }
 
     _sync() {
-        this.visible = this._slot.get_n_children() > 0;
+        this._syncVisible();
         this._reposition();
     }
 

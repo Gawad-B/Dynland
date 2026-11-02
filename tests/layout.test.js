@@ -16,10 +16,11 @@ const DEFAULTS = {
     homeIndicators: ['keyboard', 'clipboardIndicator', 'appindicator-*'],
 };
 
-test('defaults: clock + prayer centre, home page, more page, Quick Settings in the corner', () => {
+test('defaults: clock, prayer beside it, home page, more page, Quick Settings in the corner', () => {
     assertEqual(splitIndicators(PANEL, DEFAULTS), {
         left: ['activities'],
-        center: ['dateMenu', 'prayer-times'],
+        center: ['dateMenu'],
+        idle: ['prayer-times'],
         home: ['keyboard', 'clipboardIndicator', 'appindicator-2', 'appindicator-1'],
         more: ['apps-menu', 'vitalsMenu'],
         corner: ['screenSharing', 'quickSettings'],
@@ -32,9 +33,9 @@ test('a trailing * matches any suffix, other patterns match exactly', () => {
     assertEqual(matchesRole('vitalsMenu', ['vitals']), false);
 });
 
-test('the clock leads the centre even when listed after an idle indicator', () => {
+test('the clock and the idle indicators get separate slots', () => {
     const r = splitIndicators({left: [], center: ['prayer-times', 'dateMenu'], right: []}, DEFAULTS);
-    assertEqual(r.center, ['dateMenu', 'prayer-times']);
+    assertEqual([r.center, r.idle], [['dateMenu'], ['prayer-times']]);
 });
 
 test('turned-off items stay in the hidden panel', () => {
@@ -45,11 +46,11 @@ test('turned-off items stay in the hidden panel', () => {
         showActivities: false,
         showTrayIndicators: false,
     });
-    assertEqual(r, {left: [], center: ['prayer-times'], home: [], more: [], corner: []});
+    assertEqual(r, {left: [], center: [], idle: ['prayer-times'], home: [], more: [], corner: []});
 });
 
 test('Quick Settings stays in the corner even when listed as idle', () => {
     const r = splitIndicators(PANEL, {...DEFAULTS, idleIndicators: ['quickSettings']});
     assertEqual(r.corner, ['screenSharing', 'quickSettings']);
-    assertEqual(r.center, ['dateMenu']);
+    assertEqual(r.idle, []);
 });

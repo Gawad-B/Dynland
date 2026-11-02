@@ -9,34 +9,43 @@ import GObject from 'gi://GObject';
 import Meta from 'gi://Meta';
 import St from 'gi://St';
 
-import {MorphBox, scaleFactor} from './morphBox.js';
+import {MorphBox, followFullscreen, scaleFactor} from './morphBox.js';
 
 const GAP = 8; // logical px between the island and the bubble
 const POP_IN_MS = 220;
 const POP_OUT_MS = 140;
 const POP_SCALE = 0.4;
+const SLIDE_MS = 200;
 
 export const Bubble = GObject.registerClass({
     Signals: {
-        // Emitted when the pointer starts (true) or stops (false) holding a
-        // live activity open, so its timeout can pause.
-        'activity-hover': {param_types: [GObject.TYPE_BOOLEAN]},
+        // Emitted when the pointer starts (true) or stops (false) holding the
+        // live activity with this id open, so its timeout can pause.
+        'activity-hover': {param_types: [GObject.TYPE_STRING, GObject.TYPE_BOOLEAN]},
     },
 }, class Bubble extends MorphBox {
     /**
      * @param {Gio.Settings} settings Dynland settings
-     * @param {Island} island the bubble sits to its right
+     * @param {Island} island the bubble is as tall as the island
+     * @param {?Bubble} previous the bubble sits right of this one while it
+     *   shows, otherwise right of the island
      * @param {object} deps
      * @param {(id: string, error: Error) => void} deps.onActivityError
      */
-    constructor(settings, island, {onActivityError}) {
+    constructor(settings, island, previous, {onActivityError}) {
         super(settings, {name: 'dynlandBubble', style_class: 'dynland-bubble', visible: false});
 
         this._island = island;
+        this._previous = previous;
+        this._anchor = null;
+        this._slideTo = null; // x the bubble is sliding to, null when still
+        this._heldId = null;
         this._onActivityError = onActivityError;
         this._activity = null;
         this._activityExpanded = false;
         this._poppingOut = false;
+        this._wanted = false; // shown, unless a fullscreen window hides it
+        this._syncVisible = followFullscreen(this, () => this._wanted);
         this._errorSources = new Set();
 
         // The compact row is named 'panel' so it is exactly as tall as the island's rows.
@@ -60,11 +69,14 @@ export const Bubble = GObject.registerClass({
         // The island notifies these mid-layout; following it right there
         // would leave the bubble without an allocation (and undrawn) for a frame.
         this._followId = 0;
-        island.connectObject(
-            'notify::x', () => this._queueFollow(),
-            'notify::y', () => this._queueFollow(),
-            'notify::width', () => this._queueFollow(),
-            'notify::height', () => this._queueFollow(), this);
+        for (const actor of [island, previous].filter(Boolean)) {
+            actor.connectObject(
+                'notify::x', () => this._queueFollow(),
+                'notify::y', () => this._queueFollow(),
+                'notify::width', () => this._queueFollow(),
+                'notify::height', () => this._queueFollow(),
+                'notify::visible', () => this._queueFollow(), this);
+        }
         this.connect('notify::hover', () => this._setActivityExpanded(this.hover));
         this.connect('destroy', () => {
             if (this._followId)
@@ -75,9 +87,18 @@ export const Bubble = GObject.registerClass({
         });
     }
 
+    /** @type {?{id: string, content: object}} */
+    get activity() {
+        return this._activity;
+    }
+
     /** @param {?{id: string, content: object}} current from ActivityManager */
     setActivity(current) {
         const wasShown = !!this._activity;
+        if (this._heldId && this._heldId !== current?.id) {
+            this.emit('activity-hover', this._heldId, false);
+            this._heldId = null;
+        }
         this._activity = current;
         this._activityExpanded = !!current && this.hover && !!current.content.expanded;
 
@@ -87,11 +108,13 @@ export const Bubble = GObject.registerClass({
         }
 
         this._render();
-        if (!wasShown || !this.visible || this._poppingOut)
+        if (!wasShown || !this._wanted || this._poppingOut)
             this._popIn();
         // A new activity that opens under the pointer is held open like a hovered one.
-        if (this._activityExpanded)
-            this.emit('activity-hover', true);
+        if (this._activityExpanded && !this._heldId) {
+            this._heldId = current.id;
+            this.emit('activity-hover', current.id, true);
+        }
     }
 
     _popIn() {
@@ -99,7 +122,8 @@ export const Bubble = GObject.registerClass({
         this.remove_transition('opacity');
         this.remove_transition('scale-x');
         this.remove_transition('scale-y');
-        this.show();
+        this._wanted = true;
+        this._syncVisible();
         this._reposition();
         if (!this._motionAllowed()) {
             this.opacity = 255;
@@ -120,7 +144,8 @@ export const Bubble = GObject.registerClass({
     _popOut() {
         const clear = () => {
             this._poppingOut = false;
-            this.hide();
+            this._wanted = false;
+            this._syncVisible();
             this.opacity = 255;
             this.set_scale(1, 1);
             this._render();
@@ -149,7 +174,11 @@ export const Bubble = GObject.registerClass({
         if (this._activityExpanded === expanded)
             return;
         this._activityExpanded = expanded;
-        this.emit('activity-hover', expanded);
+        const id = this._activity?.id ?? this._heldId;
+        if (id && (expanded ? this._heldId !== id : this._heldId)) {
+            this._heldId = expanded ? id : null;
+            this.emit('activity-hover', id, expanded);
+        }
         this._render();
     }
 
@@ -225,8 +254,28 @@ export const Bubble = GObject.registerClass({
         const island = this._island;
         if (!this.get_stage() || !island.get_stage())
             return;
-        this.set_position(
-            Math.floor(island.x + island.width + GAP * scaleFactor()),
-            island.y);
+        const previous = this._previous;
+        const anchor = previous?.visible ? previous : island;
+        // Where the anchor is heading, not where it is mid-slide.
+        const anchorX = anchor._slideTo ?? anchor.x;
+        const x = Math.floor(anchorX + anchor.width + GAP * scaleFactor());
+        const slide = this._anchor && anchor !== this._anchor && this.visible && this._motionAllowed();
+        this._anchor = anchor;
+
+        this.y = island.y;
+        if (slide || (this._slideTo !== null && this._slideTo !== x)) {
+            // The bubble before it came or went: slide over instead of jumping.
+            this._slideTo = x;
+            this.ease({
+                x,
+                duration: SLIDE_MS,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+                onComplete: () => {
+                    this._slideTo = null;
+                },
+            });
+        } else if (this._slideTo === null) {
+            this.x = x;
+        }
     }
 });

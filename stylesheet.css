@@ -9,7 +9,10 @@
   padding: 2px 6px;
 }
 
-.dynland-island { min-width: 160px; }
+.dynland-island { min-width: 100px; }
+.dynland-island .panel-button { -natural-hpadding: 8px; -minimum-hpadding: 4px; }
+/* GNOME 50 gives the clock text its own 12px side padding; inside the pill it reads as a gap. */
+.dynland-island .clock-display .clock { padding-left: 2px; padding-right: 2px; }
 .dynland-corner { border-radius: 999px; padding: 2px 4px; }
 /* Hidden screen-recording/sharing indicators keep a zero-width box; no spacing for them. */
 .dynland-corner .dynland-row#panel,

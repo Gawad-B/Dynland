@@ -3,6 +3,7 @@
 // indicators to Main.panel.statusArea as usual.
 
 import GLib from 'gi://GLib';
+import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
@@ -152,8 +153,17 @@ export class PanelBridge {
         const index = parent.get_children().indexOf(container);
 
         parent.remove_child(container);
-        this._borrowed.push({indicator, container, parent, index});
+        const record = {indicator, container, parent, index, pad: null};
+        this._borrowed.push(record);
         target.add_child(container);
+
+        // GNOME pads the clock's left side to balance the unread-notifications
+        // dot on its right; in the pill that only reads as empty space.
+        const pad = role === 'dateMenu' ? indicator._clockDisplay?.get_previous_sibling() : null;
+        if (pad && pad.constructor === St.Widget) {
+            record.pad = {actor: pad, parent: pad.get_parent()};
+            record.pad.parent.remove_child(pad);
+        }
 
         // GNOME blocks banners while the calendar is open by finding the date
         // menu in the panel's centre box; once lent out, do it here.
@@ -214,7 +224,9 @@ export class PanelBridge {
     // Undo in reverse order so every recorded index is valid again.
     _restoreAll() {
         this._restoreMenus();
-        for (const {indicator, container, parent, index} of this._borrowed.reverse()) {
+        for (const {indicator, container, parent, index, pad} of this._borrowed.reverse()) {
+            if (pad && !pad.actor.get_parent())
+                pad.parent.insert_child_at_index(pad.actor, 0);
             indicator.disconnectObject(this);
             // bannerBlocked is write-only; the menu closes once unmapped, after we stop listening.
             if (indicator.menu?.isOpen && indicator === Main.panel.statusArea.dateMenu)
