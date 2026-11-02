@@ -20,10 +20,21 @@ const STATUS_WORDS = {
 };
 const DeviceProxy = Gio.DBusProxy.makeProxyWrapper(loadInterfaceXML('org.freedesktop.UPower.Device'));
 
-const isCharging = state =>
-    state === UPower.DeviceState.CHARGING ||
-    state === UPower.DeviceState.FULLY_CHARGED ||
-    state === UPower.DeviceState.PENDING_CHARGE;
+// true: on the charger, false: running on battery, null: unknown (ignored).
+const isCharging = state => {
+    switch (state) {
+    case UPower.DeviceState.CHARGING:
+    case UPower.DeviceState.FULLY_CHARGED:
+    case UPower.DeviceState.PENDING_CHARGE:
+        return true;
+    case UPower.DeviceState.DISCHARGING:
+    case UPower.DeviceState.EMPTY:
+    case UPower.DeviceState.PENDING_DISCHARGE:
+        return false;
+    default:
+        return null;
+    }
+};
 
 export class PowerActivity {
     enable(manager) {
@@ -37,9 +48,12 @@ export class PowerActivity {
                     console.warn(`Dynland: UPower unavailable: ${error.message}`);
                     return;
                 }
+                // The proxy loads asynchronously: ignore it if we were disabled meanwhile.
+                if (this._proxy !== proxy)
+                    return;
                 this._wasCharging = isCharging(proxy.State);
                 proxy.connectObject('g-properties-changed',
-                    manager.guard(ID, () => this._onChanged()), this);
+                    manager.guard(ID, () => this._onChanged(proxy)), this);
             }));
     }
 
@@ -49,19 +63,24 @@ export class PowerActivity {
         this._manager.release(ID);
     }
 
-    _onChanged() {
+    _onChanged(emitter = this._proxy) {
         const proxy = this._proxy;
-        if (!proxy.IsPresent)
+        if (!proxy || emitter !== proxy || !proxy.IsPresent)
             return;
 
         const charging = isCharging(proxy.State);
+        if (charging === null)
+            return;
         const percent = Math.round(proxy.Percentage);
 
         if (charging !== this._wasCharging) {
+            const first = this._wasCharging === null;
             this._wasCharging = charging;
             if (charging)
                 this._warned.clear();
-            this._flash(charging ? 'charging' : 'unplugged', percent, proxy.IconName);
+            // The first known state after an unknown start is not an event.
+            if (!first)
+                this._flash(charging ? 'charging' : 'unplugged', percent, proxy.IconName);
         }
 
         if (!charging) {
