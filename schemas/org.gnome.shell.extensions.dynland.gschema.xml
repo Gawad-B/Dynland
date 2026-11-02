@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.dynland"
+          path="/org/gnome/shell/extensions/dynland/">
+
+    <!-- Top-bar functions -->
+    <key name="show-clock" type="b">
+      <default>true</default>
+      <summary>Show the clock (opens calendar and notifications)</summary>
+    </key>
+    <key name="show-quick-settings" type="b">
+      <default>true</default>
+      <summary>Show Quick Settings (Wi-Fi, volume, battery, power)</summary>
+    </key>
+    <key name="show-activities" type="b">
+      <default>true</default>
+      <summary>Show the Activities button with workspace dots</summary>
+    </key>
+    <key name="show-tray-indicators" type="b">
+      <default>true</default>
+      <summary>Show other indicators (extensions, tray icons) when expanded</summary>
+    </key>
+    <key name="idle-indicators" type="as">
+      <default>['quickSettings']</default>
+      <summary>Indicators shown in the idle pill</summary>
+      <description>Main.panel.statusArea role names, e.g. 'quickSettings' or 'vitalsMenu'.</description>
+    </key>
+
+    <!-- Live activities -->
+    <key name="activity-notifications" type="b">
+      <default>true</default>
+      <summary>Show notifications in the island</summary>
+    </key>
+    <key name="activity-media" type="b">
+      <default>true</default>
+      <summary>Show playing media in the island</summary>
+    </key>
+    <key name="activity-osd" type="b">
+      <default>true</default>
+      <summary>Show volume and brightness changes in the island</summary>
+    </key>
+    <key name="activity-power" type="b">
+      <default>true</default>
+      <summary>Show charging and low-battery events in the island</summary>
+    </key>
+    <key name="activity-prayer" type="b">
+      <default>true</default>
+      <summary>Show the next-prayer countdown in the island</summary>
+    </key>
+    <key name="prayer-lead-minutes" type="i">
+      <range min="1" max="120"/>
+      <default>15</default>
+      <summary>Minutes before a prayer to start the countdown</summary>
+    </key>
+
+    <!-- Appearance and behaviour -->
+    <key name="reserve-space" type="b">
+      <default>true</default>
+      <summary>Keep maximised windows below the island</summary>
+    </key>
+    <key name="style" type="s">
+      <choices>
+        <choice value="solid"/>
+        <choice value="blur"/>
+      </choices>
+      <default>'solid'</default>
+      <summary>Island background</summary>
+    </key>
+    <key name="reduce-motion" type="b">
+      <default>false</default>
+      <summary>Turn off morph animations</summary>
+    </key>
+    <key name="dynland-toggle" type="as">
+      <default><![CDATA[['<Super>b']]]></default>
+      <summary>Shortcut to expand or collapse the island</summary>
+    </key>
+
+    <!-- Testing -->
+    <key name="debug-fake-prayer-minutes" type="i">
+      <default>-1</default>
+      <summary>Testing only: pretend the next prayer is this many minutes after enable (-1 = off)</summary>
+    </key>
+  </schema>
+</schemalist>

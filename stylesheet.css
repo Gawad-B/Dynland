@@ -1,0 +1,134 @@
+/* Dynland island. Rows are named #panel, so GNOME's panel-button styles
+   apply to the borrowed indicators; these rules only shape the pill. */
+
+.dynland-island {
+  background-color: #000000;
+  color: #ffffff;
+  padding: 2px 6px;
+  min-width: 180px;
+}
+
+.dynland-island.dynland-expanded,
+.dynland-island.dynland-activity-expanded {
+  padding: 8px 12px;
+}
+
+.dynland-island.dynland-blur {
+  background-color: rgba(0, 0, 0, 0.55);
+}
+
+.dynland-island .dynland-row#panel {
+  background-color: transparent;
+  spacing: 4px;
+}
+
+.dynland-row2 {
+  padding-top: 4px;
+}
+
+.dynland-slot {
+  spacing: 2px;
+}
+
+.dynland-date {
+  font-weight: bold;
+  padding: 0 10px;
+}
+
+.dynland-activity {
+  padding: 4px 8px;
+  min-height: 28px;
+}
+
+/* Shared controls */
+.dynland-icon-button {
+  border-radius: 999px;
+  padding: 6px;
+  color: #ffffff;
+}
+.dynland-icon-button:hover {
+  background-color: rgba(255, 255, 255, 0.17);
+}
+.dynland-pill-button {
+  border-radius: 999px;
+  padding: 6px 14px;
+  margin: 0 3px;
+  background-color: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+  font-weight: bold;
+}
+.dynland-pill-button:hover {
+  background-color: rgba(255, 255, 255, 0.22);
+}
+.dynland-level-track {
+  height: 6px;
+  border-radius: 3px;
+  background-color: rgba(255, 255, 255, 0.25);
+}
+.dynland-level-fill {
+  height: 6px;
+  border-radius: 3px;
+  background-color: #ffffff;
+}
+
+/* Notifications */
+.dynland-notification-compact { spacing: 8px; }
+.dynland-notification-title { font-weight: bold; }
+.dynland-notification-card { spacing: 8px; min-width: 360px; max-width: 420px; }
+.dynland-notification-header { spacing: 10px; }
+.dynland-notification-body { color: rgba(255, 255, 255, 0.8); }
+.dynland-notification-actions { spacing: 6px; }
+.dynland-dismiss-button {
+  border-radius: 999px;
+  padding: 6px;
+  background-color: rgba(224, 27, 36, 0.85);
+  color: #ffffff;
+}
+.dynland-dismiss-button:hover { background-color: #e01b24; }
+.dynland-pill-button.dynland-primary { background-color: #2ec27e; color: #ffffff; font-weight: bold; }
+.dynland-pill-button.dynland-primary:hover { background-color: #33d17a; }
+
+/* Media */
+.dynland-media-compact { spacing: 10px; }
+.dynland-media-art { border-radius: 6px; background-color: rgba(255, 255, 255, 0.12); }
+.dynland-media-art-small { width: 22px; height: 22px; border-radius: 6px; }
+.dynland-media-art-large { width: 56px; height: 56px; border-radius: 12px; }
+.dynland-media-clock { font-weight: bold; }
+.dynland-media-bars { spacing: 2px; height: 16px; }
+.dynland-media-bar {
+  width: 3px;
+  border-radius: 999px;
+  background-gradient-direction: vertical;
+  background-color: #ff4f8b;
+  background-gradient-end: #c061cb;
+}
+.dynland-media-card { spacing: 14px; min-width: 380px; max-width: 420px; }
+.dynland-media-top { spacing: 12px; }
+.dynland-media-title { font-weight: bold; }
+.dynland-media-artist { color: rgba(255, 255, 255, 0.7); }
+.dynland-media-progress-row { spacing: 10px; }
+.dynland-media-time { color: rgba(255, 255, 255, 0.7); font-size: 0.85em; font-feature-settings: "tnum"; }
+.dynland-media-controls { spacing: 24px; }
+.dynland-media-button { padding: 8px; }
+
+/* Prayer */
+.dynland-prayer-compact { spacing: 8px; font-weight: bold; }
+.dynland-prayer-countdown { font-feature-settings: "tnum"; color: #f6d32d; }
+.dynland-prayer-list { spacing: 4px; min-width: 200px; }
+.dynland-prayer-row { spacing: 24px; }
+.dynland-prayer-next { color: #f6d32d; font-weight: bold; }
+
+/* Volume and brightness */
+.dynland-osd { spacing: 10px; }
+.dynland-level-label { min-width: 24px; text-align: right; font-weight: bold; }
+
+/* Charging and low battery */
+.dynland-power { spacing: 8px; font-weight: bold; }
+.dynland-power-charging { color: #57e389; }
+.dynland-power-low { color: #ff7b63; }
+.dynland-power-percent { font-weight: bold; }
+.dynland-power-status { color: rgba(255, 255, 255, 0.8); }
+.dynland-power-charging .dynland-power-status { color: #57e389; }
+.dynland-power-charging StIcon { color: #57e389; }
+.dynland-power-low .dynland-power-status { color: #ff7b63; }
+.dynland-power-low StIcon { color: #ff7b63; }

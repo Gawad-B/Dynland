@@ -1,0 +1,7 @@
+{
+  "uuid": "dynland-devtools@gawad-b.github.io",
+  "name": "Dynland dev tools (nested shell only)",
+  "description": "Puts the nested test shell in unsafe mode so scripts can use org.gnome.Shell.Eval and Screenshot. Never install in a real session.",
+  "shell-version": ["50", "51"],
+  "version": 1
+}
