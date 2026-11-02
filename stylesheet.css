@@ -54,7 +54,7 @@
   border-radius: 999px;
   padding: 6px 14px;
   margin: 0 3px;
-  background-color: rgba(255, 255, 255, 0.12);
+  background-color: rgba(255, 255, 255, 0.16);
   color: #ffffff;
   font-weight: bold;
 }
@@ -79,6 +79,15 @@
 .dynland-notification-header { spacing: 10px; }
 .dynland-notification-body { color: rgba(255, 255, 255, 0.8); }
 .dynland-notification-actions { spacing: 6px; }
+.dynland-dismiss-button {
+  border-radius: 999px;
+  padding: 6px;
+  background-color: rgba(224, 27, 36, 0.85);
+  color: #ffffff;
+}
+.dynland-dismiss-button:hover { background-color: #e01b24; }
+.dynland-pill-button.dynland-primary { background-color: #2ec27e; color: #ffffff; font-weight: bold; }
+.dynland-pill-button.dynland-primary:hover { background-color: #33d17a; }
 
 /* OSD */
 .dynland-osd { spacing: 10px; }
