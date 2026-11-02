@@ -39,7 +39,10 @@ export class NotificationsActivity {
 
         for (const source of tray.getSources())
             this._watchSource(source);
-        tray.connectObject('source-added', (_tray, source) => this._watchSource(source), this);
+        tray.connectObject(
+            'source-added', (_tray, source) => this._watchSource(source),
+            'source-removed', (_tray, source) => this._unwatchSource(source),
+            this);
     }
 
     disable() {
@@ -60,19 +63,32 @@ export class NotificationsActivity {
     }
 
     _watchSource(source) {
+        if (this._sources.has(source))
+            return;
         this._sources.add(source);
         source.connectObject(
             'notification-request-banner',
             this._manager.guard(ID, (_source, notification) => this._onBanner(notification)),
-            'destroy', () => this._sources.delete(source),
+            'destroy', () => this._unwatchSource(source),
             this);
     }
 
-    // Same filters as MessageTray._onNotificationRequestBanner.
-    _onBanner(notification) {
-        if (this._calendarBlocked || notification.acknowledged || notification.urgency === Urgency.LOW)
+    // GNOME emits 'source-removed' (not 'destroy') when a source's policy is disabled.
+    _unwatchSource(source) {
+        if (!this._sources.delete(source))
             return;
-        if (!notification.source.policy.showBanners && notification.urgency !== Urgency.CRITICAL)
+        source.disconnectObject(this);
+    }
+
+    // Same filters as MessageTray._onNotificationRequestBanner.
+    _canShow(notification) {
+        if (notification.acknowledged || notification.urgency === Urgency.LOW)
+            return false;
+        return notification.source.policy.showBanners || notification.urgency === Urgency.CRITICAL;
+    }
+
+    _onBanner(notification) {
+        if (this._calendarBlocked || !this._canShow(notification))
             return;
 
         if (this._showing === notification) {
@@ -88,7 +104,15 @@ export class NotificationsActivity {
     }
 
     _showNext() {
-        this._showing = this._queue.shift() ?? null;
+        this._showing = null;
+        while (this._queue.length > 0) {
+            const next = this._queue.shift();
+            if (this._canShow(next)) {
+                this._showing = next;
+                break;
+            }
+            next.disconnectObject(this);
+        }
         if (this._showing)
             this._show(this._showing);
     }
@@ -179,8 +203,8 @@ export class NotificationsActivity {
                     x_expand: true,
                 });
                 button.connect('clicked', this._manager.guard(ID, () => {
-                    action.activate();
                     this._manager.release(ID);
+                    action.activate();
                 }));
                 actions.add_child(button);
             });
@@ -190,8 +214,10 @@ export class NotificationsActivity {
         // Clicking the card itself opens the app; scrolling up dismisses it.
         const click = new Clutter.ClickGesture();
         click.connect('recognize', this._manager.guard(ID, () => {
-            notification.activate();
+            // Release first: activating destroys non-resident notifications,
+            // which would start the next queued one and then be released.
             this._manager.release(ID);
+            notification.activate();
         }));
         card.add_action_full('dynland-open', Clutter.EventPhase.TARGET, click);
 
