@@ -20,7 +20,6 @@ export class PanelBridge {
         this._island = null;
         this._borrowed = [];
         this._refreshId = 0;
-        this._wasVisible = true;
         this._addToPanelBoxDescriptor = null;
         this._untracked = false;
         this._wrapped = false;
@@ -38,7 +37,6 @@ export class PanelBridge {
             // GNOME re-shows tracked chrome on overview/session/monitor changes
             // and keeps a hidden box's strut, so stop tracking it while hidden.
             const panelBox = Main.layoutManager.panelBox;
-            this._wasVisible = panelBox.visible;
             Main.layoutManager.untrackChrome(panelBox);
             this._untracked = true;
             panelBox.hide();
@@ -81,7 +79,7 @@ export class PanelBridge {
         if (this._untracked) {
             const panelBox = Main.layoutManager.panelBox;
             Main.layoutManager.trackChrome(panelBox, {affectsStruts: true, trackFullscreen: true});
-            panelBox.visible = this._wasVisible;
+            // GNOME's own fullscreen logic (trackChrome) decides visibility.
             this._untracked = false;
         }
         this._island = null;
