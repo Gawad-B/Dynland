@@ -6,7 +6,6 @@
   color: #ffffff;
   padding: 2px 6px;
   min-width: 180px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 }
 
 .dynland-island.dynland-expanded,
@@ -89,15 +88,6 @@
 .dynland-pill-button.dynland-primary { background-color: #2ec27e; color: #ffffff; font-weight: bold; }
 .dynland-pill-button.dynland-primary:hover { background-color: #33d17a; }
 
-/* OSD */
-.dynland-osd { spacing: 10px; }
-.dynland-level-label { font-weight: bold; min-width: 2em; }
-
-/* Power */
-.dynland-power { spacing: 8px; font-weight: bold; }
-.dynland-power-charging { color: #57e389; }
-.dynland-power-low { color: #ff7b63; }
-
 /* Media */
 .dynland-media-compact { spacing: 10px; }
 .dynland-media-art { border-radius: 6px; background-color: rgba(255, 255, 255, 0.12); }
@@ -112,7 +102,7 @@
   background-color: #ff4f8b;
   background-gradient-end: #c061cb;
 }
-.dynland-media-card { spacing: 14px; min-width: 380px; }
+.dynland-media-card { spacing: 14px; min-width: 380px; max-width: 420px; }
 .dynland-media-top { spacing: 12px; }
 .dynland-media-title { font-weight: bold; }
 .dynland-media-artist { color: rgba(255, 255, 255, 0.7); }
@@ -133,7 +123,9 @@
 .dynland-level-label { min-width: 24px; text-align: right; font-weight: bold; }
 
 /* Charging and low battery */
-.dynland-power { spacing: 8px; }
+.dynland-power { spacing: 8px; font-weight: bold; }
+.dynland-power-charging { color: #57e389; }
+.dynland-power-low { color: #ff7b63; }
 .dynland-power-percent { font-weight: bold; }
 .dynland-power-status { color: rgba(255, 255, 255, 0.8); }
 .dynland-power-charging .dynland-power-status { color: #57e389; }

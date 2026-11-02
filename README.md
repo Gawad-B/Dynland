@@ -8,9 +8,18 @@ Every feature can be switched off in the preferences.
 ## Install
 
     ./scripts/install.sh
+
+On Wayland, log out and back in so GNOME Shell loads the newly installed extension, then:
+
     gnome-extensions enable dynland@gawad-b.github.io
 
-On Wayland, log out and back in so GNOME Shell loads a newly installed extension.
+## Use
+
+- Preferences: `gnome-extensions prefs dynland@gawad-b.github.io` (features, layout,
+  idle indicators, style, shortcut).
+- Press Super+B to expand or collapse the island (configurable in the preferences).
+- The island lives on the primary monitor only.
+- Panel items that have no status-area role (rare) are hidden while Dynland is enabled.
 
 ## Develop
 
