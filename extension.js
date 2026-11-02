@@ -8,7 +8,8 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
-import {Island} from './island.js';
+import {Bubble} from './bubble.js';
+import {Corner, Island} from './island.js';
 import {PanelBridge} from './panelBridge.js';
 import {ActivityManager} from './lib/activityManager.js';
 import * as Media from './activities/media.js';
@@ -51,8 +52,11 @@ export default class DynlandExtension extends Extension {
         this._bridge = new PanelBridge(this._settings);
         this._island = new Island(this._settings, {
             anyMenuOpen: () => this._bridge.anyMenuOpen(),
+        });
+        this._bubble = new Bubble(this._settings, this._island, {
             onActivityError: (id, error) => this._onActivityError(id, error),
         });
+        this._corner = new Corner(this._settings);
         this._manager = new ActivityManager({
             setTimeout: (fn, ms) => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => {
                 fn();
@@ -63,7 +67,7 @@ export default class DynlandExtension extends Extension {
             onError: (id, error) => this._onActivityError(id, error),
         });
 
-        this._island.connect('activity-hover', (_island, held) => {
+        this._bubble.connect('activity-hover', (_bubble, held) => {
             const id = this._manager.current?.id;
             if (!id)
                 return;
@@ -71,8 +75,11 @@ export default class DynlandExtension extends Extension {
             this._heldId = held ? id : null;
         });
 
-        this._bridge.enable(this._island);
-        Main.layoutManager.addChrome(this._island, {affectsStruts: false, trackFullscreen: true});
+        // On the stage before indicators move in, so they never lay out off-stage.
+        // The bubble goes on top: its opened card can reach over the corner pill.
+        for (const actor of [this._island, this._corner, this._bubble])
+            Main.layoutManager.addChrome(actor, {affectsStruts: false, trackFullscreen: true});
+        this._bridge.enable(name => name === 'corner' ? this._corner.slot() : this._island.slot(name));
 
         this._updateStrut();
         this._settings.connectObject('changed::reserve-space', () => this._updateStrut(), this);
@@ -111,21 +118,27 @@ export default class DynlandExtension extends Extension {
         this._activities?.clear();
         this._manager?.clear();
 
-        // Return borrowed indicators BEFORE destroying the island, or they
-        // would be destroyed with it.
+        // Off the stage first: a relayout queued while indicators leave would
+        // otherwise run on actors that are already gone.
+        const actors = [this._bubble, this._corner, this._island].filter(Boolean);
+        for (const actor of actors) {
+            if (actor.get_parent())
+                Main.layoutManager.removeChrome(actor);
+        }
+        // Return borrowed indicators BEFORE destroying the island and corner,
+        // or they would be destroyed with them.
         try {
             this._bridge?.disable();
         } catch (e) {
             console.error('Dynland: error while returning the top bar', e);
         }
         this._removeStrut();
-        if (this._island) {
-            if (this._island.get_parent())
-                Main.layoutManager.removeChrome(this._island);
-            this._island.destroy();
-        }
+        for (const actor of actors)
+            actor.destroy();
 
         this._island = null;
+        this._bubble = null;
+        this._corner = null;
         this._bridge = null;
         this._manager = null;
         this._activities = null;
@@ -165,7 +178,7 @@ export default class DynlandExtension extends Extension {
             this._manager.hold(this._heldId, false);
             this._heldId = null;
         }
-        this._island.setActivity(current);
+        this._bubble.setActivity(current);
     }
 
     // An activity that throws is turned off for this session; its setting is untouched.

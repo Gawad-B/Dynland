@@ -39,7 +39,6 @@ export class MediaActivity {
     enable(manager, settings) {
         this._manager = manager;
         this._settings = settings;
-        this._interface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
         this._players = new Set();
         this._playingSince = new Map();
         this._player = null;
@@ -64,7 +63,6 @@ export class MediaActivity {
         this._source = null;
         this._player = null;
         this._requested = null;
-        this._interface = null;
         this._manager?.release(ID);
     }
 
@@ -218,22 +216,9 @@ export class MediaActivity {
 
     _compact(player) {
         const box = new St.BoxLayout({style_class: 'dynland-media-compact', x_expand: true});
+        // The bubble beside the island: just the cover and the equalizer.
         box.add_child(this._art(player, 22, 'dynland-media-art-small'));
-
-        const clock = new St.Label({style_class: 'dynland-media-clock', y_align: Clutter.ActorAlign.CENTER});
-        const updateClock = () => {
-            const format = this._interface?.get_string('clock-format') === '12h' ? '%-l:%M' : '%H:%M';
-            clock.text = GLib.DateTime.new_now_local().format(format);
-            return GLib.SOURCE_CONTINUE;
-        };
-        updateClock();
-        const clockId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 10, updateClock);
-        box.add_child(clock);
-
-        box.add_child(new St.Widget({x_expand: true}));
         box.add_child(this._equalizer(player));
-
-        box.connect('destroy', () => GLib.source_remove(clockId));
         return box;
     }
 

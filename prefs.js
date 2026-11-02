@@ -33,6 +33,18 @@ function group(title, rows, description = '') {
     return g;
 }
 
+function listRow(settings, key, title) {
+    const row = new Adw.EntryRow({
+        title,
+        text: settings.get_strv(key).join(', '),
+        show_apply_button: true,
+    });
+    row.connect('apply', () => {
+        settings.set_strv(key, row.text.split(',').map(s => s.trim()).filter(Boolean));
+    });
+    return row;
+}
+
 export default class DynlandPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         const settings = this.getSettings();
@@ -46,26 +58,20 @@ export default class DynlandPreferences extends ExtensionPreferences {
 
         page.add(group('Functions', [
             switchRow(settings, 'show-clock', 'Clock', 'Opens the calendar and notification list'),
-            switchRow(settings, 'show-quick-settings', 'Quick Settings', 'Wi-Fi, volume, battery and power'),
+            switchRow(settings, 'show-quick-settings', 'Quick Settings', 'Wi-Fi, volume, battery and power, in their own pill at the top-right'),
             switchRow(settings, 'show-activities', 'Activities and workspaces', 'The workspace dots'),
-            switchRow(settings, 'show-tray-indicators', 'Other indicators', 'Extension and tray icons, shown when expanded'),
+            switchRow(settings, 'show-tray-indicators', 'Other indicators', 'Extension and tray icons, shown on the expanded pages'),
         ]));
 
-        const idle = new Adw.EntryRow({
-            title: 'Idle pill indicators (comma-separated)',
-            text: settings.get_strv('idle-indicators').join(', '),
-            show_apply_button: true,
-        });
-        idle.connect('apply', () => {
-            settings.set_strv('idle-indicators',
-                idle.text.split(',').map(s => s.trim()).filter(Boolean));
-        });
-        page.add(group('Idle pill', [idle],
-            'Indicators always shown in the small pill. Use GNOME panel role names, such as quickSettings.'));
+        page.add(group('Indicator placement', [
+            listRow(settings, 'idle-indicators', 'Beside the clock (comma-separated)'),
+            listRow(settings, 'home-indicators', 'First expanded page (comma-separated)'),
+        ], 'Use GNOME panel role names, such as prayer-times or vitalsMenu; a trailing * matches any suffix, as in appindicator-*. ' +
+            'Everything else goes on the second page: scroll over the expanded island to reach it.'));
 
         const style = new Adw.ComboRow({
             title: 'Background',
-            model: Gtk.StringList.new(['Solid black', 'Frosted glass']),
+            model: Gtk.StringList.new(['Solid black', 'Translucent']),
             selected: Math.max(0, STYLES.indexOf(settings.get_string('style'))),
         });
         style.connect('notify::selected', () => settings.set_string('style', STYLES[style.selected]));

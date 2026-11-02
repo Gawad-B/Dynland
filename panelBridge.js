@@ -10,14 +10,14 @@ import {splitIndicators} from './lib/layout.js';
 
 const LAYOUT_KEYS = [
     'show-clock', 'show-quick-settings', 'show-activities',
-    'show-tray-indicators', 'idle-indicators',
+    'show-tray-indicators', 'idle-indicators', 'home-indicators',
 ];
 
 export class PanelBridge {
     /** @param {Gio.Settings} settings Dynland settings */
     constructor(settings) {
         this._settings = settings;
-        this._island = null;
+        this._slotFor = null;
         this._borrowed = [];
         this._refreshId = 0;
         this._addToPanelBoxDescriptor = null;
@@ -25,14 +25,14 @@ export class PanelBridge {
         this._wrapped = false;
     }
 
-    /** @param {Island} island */
-    enable(island) {
+    /** @param {(name: string) => St.Widget} slotFor the island or corner box for a layout slot */
+    enable(slotFor) {
         const panel = Main.panel;
         if (!panel?._leftBox || !panel._centerBox || !panel._rightBox ||
             typeof panel._addToPanelBox !== 'function')
             throw new Error('Dynland: this GNOME Shell version has an unsupported panel layout');
 
-        this._island = island;
+        this._slotFor = slotFor;
         try {
             // GNOME re-shows tracked chrome on overview/session/monitor changes
             // and keeps a hidden box's strut, so stop tracking it while hidden.
@@ -82,7 +82,7 @@ export class PanelBridge {
             // GNOME's own fullscreen logic (trackChrome) decides visibility.
             this._untracked = false;
         }
-        this._island = null;
+        this._slotFor = null;
     }
 
     /** Puts every indicator back, then lends them out again per the current settings. */
@@ -91,8 +91,11 @@ export class PanelBridge {
 
         const panel = Main.panel;
         const roleOf = new Map();
-        for (const [role, indicator] of Object.entries(panel.statusArea))
-            roleOf.set(indicator.container, role);
+        for (const [role, indicator] of Object.entries(panel.statusArea)) {
+            // Some extensions null an entry out before re-adding it.
+            if (indicator?.container)
+                roleOf.set(indicator.container, role);
+        }
         const rolesIn = box => box.get_children().map(c => roleOf.get(c)).filter(Boolean);
 
         const split = splitIndicators({
@@ -105,11 +108,12 @@ export class PanelBridge {
             showActivities: this._settings.get_boolean('show-activities'),
             showTrayIndicators: this._settings.get_boolean('show-tray-indicators'),
             idleIndicators: this._settings.get_strv('idle-indicators'),
+            homeIndicators: this._settings.get_strv('home-indicators'),
         });
 
         for (const [slot, roles] of Object.entries(split)) {
             for (const role of roles)
-                this._borrow(role, this._island.slot(slot));
+                this._borrow(role, this._slotFor(slot));
         }
     }
 

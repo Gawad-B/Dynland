@@ -21,9 +21,14 @@
       <summary>Show other indicators (extensions, tray icons) when expanded</summary>
     </key>
     <key name="idle-indicators" type="as">
-      <default>['quickSettings']</default>
-      <summary>Indicators shown in the idle pill</summary>
-      <description>Main.panel.statusArea role names, e.g. 'quickSettings' or 'vitalsMenu'.</description>
+      <default>['prayer-times']</default>
+      <summary>Indicators shown beside the clock in the idle pill</summary>
+      <description>Main.panel.statusArea role names, e.g. 'prayer-times' or 'vitalsMenu'. A trailing * matches any suffix.</description>
+    </key>
+    <key name="home-indicators" type="as">
+      <default>['keyboard', 'clipboardIndicator', 'appindicator-*']</default>
+      <summary>Indicators on the first expanded page, beside the clock</summary>
+      <description>Main.panel.statusArea role names; a trailing * matches any suffix. Other indicators go on the second page.</description>
     </key>
 
     <!-- Live activities -->

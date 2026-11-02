@@ -1,43 +1,44 @@
 /* Dynland island. Rows are named #panel, so GNOME's panel-button styles
    apply to the borrowed indicators; these rules only shape the pill. */
 
-.dynland-island {
+.dynland-island,
+.dynland-bubble,
+.dynland-corner {
   background-color: #000000;
   color: #ffffff;
   padding: 2px 6px;
-  min-width: 180px;
 }
 
-.dynland-island.dynland-expanded,
-.dynland-island.dynland-activity-expanded {
-  padding: 8px 12px;
-}
+.dynland-island { min-width: 160px; }
+.dynland-corner { border-radius: 999px; }
 
-.dynland-island.dynland-blur {
-  background-color: rgba(0, 0, 0, 0.55);
-}
+.dynland-island.dynland-expanded { padding: 2px 10px 6px; }
+.dynland-bubble.dynland-activity-expanded { padding: 8px 12px; }
 
-.dynland-island .dynland-row#panel {
+/* GNOME's blur is always square, so the translucent style is a plain tint. */
+.dynland-translucent { background-color: rgba(0, 0, 0, 0.62); }
+
+.dynland-row#panel {
   background-color: transparent;
   spacing: 4px;
-}
-
-.dynland-row2 {
-  padding-top: 4px;
 }
 
 .dynland-slot {
   spacing: 2px;
 }
 
-.dynland-date {
-  font-weight: bold;
-  padding: 0 10px;
+.dynland-page-dots { spacing: 5px; padding-top: 2px; }
+.dynland-page-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background-color: rgba(255, 255, 255, 0.3);
 }
+.dynland-page-dot:hover { background-color: rgba(255, 255, 255, 0.55); }
+.dynland-page-dot:checked { width: 14px; background-color: #ffffff; }
 
 .dynland-activity {
-  padding: 4px 8px;
-  min-height: 28px;
+  padding: 0 6px;
 }
 
 /* Shared controls */
@@ -93,7 +94,6 @@
 .dynland-media-art { border-radius: 6px; background-color: rgba(255, 255, 255, 0.12); }
 .dynland-media-art-small { width: 22px; height: 22px; border-radius: 6px; }
 .dynland-media-art-large { width: 56px; height: 56px; border-radius: 12px; }
-.dynland-media-clock { font-weight: bold; }
 .dynland-media-bars { spacing: 2px; height: 16px; }
 .dynland-media-bar {
   width: 3px;

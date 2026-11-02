@@ -1,10 +1,10 @@
 import {test, assertEqual} from './harness.js';
-import {splitIndicators} from '../lib/layout.js';
+import {matchesRole, splitIndicators} from '../lib/layout.js';
 
 const PANEL = {
     left: ['activities', 'apps-menu'],
-    center: ['dateMenu', 'vitals'],
-    right: ['clipboard', 'appindicator', 'quickSettings'],
+    center: ['dateMenu', 'vitalsMenu'],
+    right: ['prayer-times', 'clipboardIndicator', 'appindicator-2', 'keyboard', 'appindicator-1', 'quickSettings', 'screenSharing'],
 };
 
 const DEFAULTS = {
@@ -12,22 +12,29 @@ const DEFAULTS = {
     showQuickSettings: true,
     showActivities: true,
     showTrayIndicators: true,
-    idleIndicators: ['quickSettings'],
+    idleIndicators: ['prayer-times'],
+    homeIndicators: ['keyboard', 'clipboardIndicator', 'appindicator-*'],
 };
 
-test('defaults: activities left, clock centre, quick settings right, rest expanded', () => {
+test('defaults: clock + prayer centre, home page, more page, Quick Settings in the corner', () => {
     assertEqual(splitIndicators(PANEL, DEFAULTS), {
         left: ['activities'],
-        center: ['dateMenu'],
-        right: ['quickSettings'],
-        extra: ['apps-menu', 'vitals', 'clipboard', 'appindicator'],
+        center: ['dateMenu', 'prayer-times'],
+        home: ['keyboard', 'clipboardIndicator', 'appindicator-2', 'appindicator-1'],
+        more: ['apps-menu', 'vitalsMenu'],
+        corner: ['screenSharing', 'quickSettings'],
     });
 });
 
-test('idle indicators move to the idle row, Quick Settings stays rightmost', () => {
-    const r = splitIndicators(PANEL, {...DEFAULTS, idleIndicators: ['quickSettings', 'vitals']});
-    assertEqual(r.right, ['vitals', 'quickSettings']);
-    assertEqual(r.extra, ['apps-menu', 'clipboard', 'appindicator']);
+test('a trailing * matches any suffix, other patterns match exactly', () => {
+    assertEqual(matchesRole('appindicator-7', ['appindicator-*']), true);
+    assertEqual(matchesRole('appindicator', ['appindicator-*']), false);
+    assertEqual(matchesRole('vitalsMenu', ['vitals']), false);
+});
+
+test('the clock leads the centre even when listed after an idle indicator', () => {
+    const r = splitIndicators({left: [], center: ['prayer-times', 'dateMenu'], right: []}, DEFAULTS);
+    assertEqual(r.center, ['dateMenu', 'prayer-times']);
 });
 
 test('turned-off items stay in the hidden panel', () => {
@@ -38,17 +45,11 @@ test('turned-off items stay in the hidden panel', () => {
         showActivities: false,
         showTrayIndicators: false,
     });
-    assertEqual(r, {left: [], center: [], right: [], extra: []});
+    assertEqual(r, {left: [], center: ['prayer-times'], home: [], more: [], corner: []});
 });
 
-test('an idle indicator still shows when tray indicators are off', () => {
-    const r = splitIndicators(PANEL, {...DEFAULTS, showTrayIndicators: false, idleIndicators: ['vitals', 'quickSettings']});
-    assertEqual(r.right, ['vitals', 'quickSettings']);
-    assertEqual(r.extra, []);
-});
-
-test('Quick Settings not in idle list goes to the expanded row', () => {
-    const r = splitIndicators(PANEL, {...DEFAULTS, idleIndicators: []});
-    assertEqual(r.right, []);
-    assertEqual(r.extra.at(-1), 'quickSettings');
+test('Quick Settings stays in the corner even when listed as idle', () => {
+    const r = splitIndicators(PANEL, {...DEFAULTS, idleIndicators: ['quickSettings']});
+    assertEqual(r.corner, ['screenSharing', 'quickSettings']);
+    assertEqual(r.center, ['dateMenu']);
 });

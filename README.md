@@ -1,9 +1,10 @@
 # Dynland
 
-A dynamic island for GNOME Shell 50 and 51 that replaces the top bar. The clock, Quick
-Settings, workspaces and every extension's indicators live in one pill that expands on
-hover and morphs for notifications, media, volume/brightness, battery and prayer times.
-Every feature can be switched off in the preferences.
+A dynamic island for GNOME Shell 50 and 51 that replaces the top bar. The clock and the
+idle indicators (by default Prayer Times) live in one pill that widens on hover into pages
+of indicators; Quick Settings has its own pill at the top-right corner. Notifications,
+media, volume/brightness, battery and the prayer countdown split off into a bubble beside
+the island, so the island stays usable. Every feature can be switched off in the preferences.
 
 ## Install
 
@@ -15,9 +16,12 @@ On Wayland, log out and back in so GNOME Shell loads the newly installed extensi
 
 ## Use
 
-- Preferences: `gnome-extensions prefs dynland@gawad-b.github.io` (features, layout,
-  idle indicators, style, shortcut).
+- Preferences: `gnome-extensions prefs dynland@gawad-b.github.io` (features, which
+  indicators sit beside the clock and on the first page, style, shortcut).
 - Press Super+B to expand or collapse the island (configurable in the preferences).
+- Over the expanded island, scroll (or click the page dots) to reach the second page:
+  Vitals, Apps and every other indicator.
+- Hover or click the bubble to open the activity's card.
 - The island lives on the primary monitor only.
 - Panel items that have no status-area role (rare) are hidden while Dynland is enabled.
 
