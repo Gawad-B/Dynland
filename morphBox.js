@@ -10,11 +10,13 @@ import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-const CONTENT_OUT_MS = 60;
-const MORPH_MS = 260;
+const CONTENT_OUT_MS = 50;
+const MORPH_MS = 240;
 const CONTENT_IN_MS = 140;
-const CONTENT_IN_DELAY_MS = 60;
-const CONTENT_IN_SCALE = 0.94;
+// The shape is ~70% of the way there by then (EASE_OUT_CUBIC), so the
+// content never reflows visibly and the pill is never empty for long.
+const CONTENT_IN_DELAY_MS = 70;
+const CONTENT_IN_SCALE = 0.97;
 const EXPANDED_RADIUS = 24; // CSS px: St scales inline px by the theme scale factor
 export const TOP_MARGIN = 6;
 
@@ -271,7 +273,8 @@ class MorphBox extends St.BoxLayout {
             width,
             height,
             duration: MORPH_MS,
-            mode: Clutter.AnimationMode.EASE_OUT_BACK,
+            // No overshoot: a wide card springing past its size and back wobbles.
+            mode: Clutter.AnimationMode.EASE_OUT_CUBIC,
             // onComplete only runs when the ease finished (not when interrupted).
             onComplete: () => {
                 this._morphTarget = null;

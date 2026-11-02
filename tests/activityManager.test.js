@@ -142,3 +142,15 @@ test('active lists every live activity, most important first, on every change', 
     manager.release('notification');
     assertEqual(lists, [['media'], ['notification', 'media'], ['notification', 'media'], ['media']]);
 });
+
+test('replacing a held request keeps it held', () => {
+    const {timers, manager} = setup();
+    manager.request('notification', Priority.NOTIFICATION, content({timeoutMs: 1000}));
+    manager.hold('notification', true);
+    manager.request('notification', Priority.NOTIFICATION, content({timeoutMs: 1000}));
+    timers.tick(5000);
+    assertEqual(manager.current?.id, 'notification');
+    manager.hold('notification', false);
+    timers.tick(1000);
+    assertEqual(manager.current, null);
+});
