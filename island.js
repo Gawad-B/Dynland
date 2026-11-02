@@ -1,5 +1,5 @@
 // The island: a floating pill showing the clock and the idle indicators. On
-// hover it widens into pages of indicators: the home page beside the clock,
+// hover it widens into pages of indicators: the home page after the clock,
 // and a second page reached by scrolling or the page dots.
 
 import Clutter from 'gi://Clutter';
@@ -14,69 +14,9 @@ import {MorphBox, TOP_MARGIN, followStyle, scaleFactor} from './morphBox.js';
 const HOVER_EXPAND_MS = 120;
 const LEAVE_COLLAPSE_MS = 350;
 const PAGE_SCROLL_COOLDOWN_MS = 350;
-const SIDE_SPACING = 6; // logical px between the centre group and each side
 
 const HOME = 0;
 const MORE = 1;
-
-// Lays out [start, centre, end] with the centre group exactly in the middle,
-// so the clock does not move when the sides appear.
-const SymmetricLayout = GObject.registerClass(
-class SymmetricLayout extends Clutter.LayoutManager {
-    _parts(container) {
-        const [start, center, end] = container.get_children();
-        return {start, center, end};
-    }
-
-    _width(actor, forHeight) {
-        return actor?.visible ? actor.get_preferred_width(forHeight) : [0, 0];
-    }
-
-    vfunc_get_preferred_width(container, forHeight) {
-        const {start, center, end} = this._parts(container);
-        const [cMin, cNat] = this._width(center, forHeight);
-        const [sMin, sNat] = this._width(start, forHeight);
-        const [eMin, eNat] = this._width(end, forHeight);
-        const sideNat = Math.max(sNat, eNat);
-        const gap = sideNat > 0 ? 2 * SIDE_SPACING * scaleFactor() : 0;
-        return [cMin + 2 * Math.max(sMin, eMin) + gap, cNat + 2 * sideNat + gap];
-    }
-
-    vfunc_get_preferred_height(container, _forWidth) {
-        let [min, nat] = [0, 0];
-        for (const child of container.get_children()) {
-            if (!child.visible)
-                continue;
-            const [cMin, cNat] = child.get_preferred_height(-1);
-            min = Math.max(min, cMin);
-            nat = Math.max(nat, cNat);
-        }
-        return [min, nat];
-    }
-
-    vfunc_allocate(container, box) {
-        const {start, center, end} = this._parts(container);
-        const spacing = SIDE_SPACING * scaleFactor();
-        const [y1, y2] = [box.y1, box.y2];
-
-        const [, cNat] = this._width(center, -1);
-        const cWidth = Math.min(cNat, box.get_width());
-        const cX = Math.floor(box.x1 + (box.get_width() - cWidth) / 2);
-        if (center.visible)
-            center.allocate(Clutter.ActorBox.new(cX, y1, cX + cWidth, y2));
-
-        if (start.visible) {
-            const [, sNat] = this._width(start, -1);
-            const x2 = cX - spacing;
-            start.allocate(Clutter.ActorBox.new(Math.max(box.x1, x2 - sNat), y1, x2, y2));
-        }
-        if (end.visible) {
-            const [, eNat] = this._width(end, -1);
-            const x1 = cX + cWidth + spacing;
-            end.allocate(Clutter.ActorBox.new(x1, y1, Math.min(box.x2, x1 + eNat), y2));
-        }
-    }
-});
 
 export const Island = GObject.registerClass(
 class Island extends MorphBox {
@@ -103,11 +43,10 @@ class Island extends MorphBox {
 
         // Rows are named 'panel' so GNOME's and other extensions' `#panel`
         // CSS (button padding, workspace dots, indicator styles) applies here.
-        this._homeRow = new St.Widget({
+        this._homeRow = new St.BoxLayout({
             name: 'panel',
             style_class: 'dynland-row',
-            layout_manager: new SymmetricLayout(),
-            x_expand: true,
+            x_align: Clutter.ActorAlign.CENTER,
         });
         this._homeRow.add_child(this._slots.left);
         this._homeRow.add_child(this._slots.center);

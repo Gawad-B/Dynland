@@ -6,6 +6,7 @@ import Clutter from 'gi://Clutter';
 import Graphene from 'gi://Graphene';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
+import Meta from 'gi://Meta';
 import St from 'gi://St';
 
 import {MorphBox, scaleFactor} from './morphBox.js';
@@ -39,7 +40,12 @@ export const Bubble = GObject.registerClass({
         this._errorSources = new Set();
 
         // The compact row is named 'panel' so it is exactly as tall as the island's rows.
-        this._compactBin = new St.Bin({name: 'panel', style_class: 'dynland-row dynland-activity'});
+        this._compactBin = new St.Bin({
+            name: 'panel',
+            style_class: 'dynland-row dynland-activity',
+            y_expand: true,
+            y_align: Clutter.ActorAlign.CENTER,
+        });
         this._expandedBin = new St.Bin({style_class: 'dynland-activity', visible: false});
         this.add_child(this._compactBin);
         this.add_child(this._expandedBin);
@@ -51,12 +57,18 @@ export const Bubble = GObject.registerClass({
         this._clickGesture.connect('recognize', () => this._setActivityExpanded(!this._activityExpanded));
         this.add_action_full('dynland-bubble-toggle', Clutter.EventPhase.TARGET, this._clickGesture);
 
+        // The island notifies these mid-layout; following it right there
+        // would leave the bubble without an allocation (and undrawn) for a frame.
+        this._followId = 0;
         island.connectObject(
-            'notify::x', () => this._reposition(),
-            'notify::y', () => this._reposition(),
-            'notify::width', () => this._reposition(), this);
+            'notify::x', () => this._queueFollow(),
+            'notify::y', () => this._queueFollow(),
+            'notify::width', () => this._queueFollow(),
+            'notify::height', () => this._queueFollow(), this);
         this.connect('notify::hover', () => this._setActivityExpanded(this.hover));
         this.connect('destroy', () => {
+            if (this._followId)
+                global.compositor.get_laters().remove(this._followId);
             for (const id of this._errorSources)
                 GLib.source_remove(id);
             this._errorSources.clear();
@@ -141,6 +153,22 @@ export const Bubble = GObject.registerClass({
         this._render();
     }
 
+    vfunc_get_preferred_height(forWidth) {
+        return this._withIslandHeight(super.vfunc_get_preferred_height(forWidth));
+    }
+
+    _naturalSize() {
+        const [width, height] = super._naturalSize();
+        return [width, this._withIslandHeight([0, height])[1]];
+    }
+
+    _withIslandHeight([min, nat]) {
+        if (this._activityExpanded || !this._island.get_stage())
+            return [min, nat];
+        const height = this._island.height;
+        return [Math.max(min, height), Math.max(nat, height)];
+    }
+
     _containers() {
         return [this._compactBin, this._expandedBin];
     }
@@ -178,6 +206,19 @@ export const Bubble = GObject.registerClass({
             return GLib.SOURCE_REMOVE;
         });
         this._errorSources.add(sourceId);
+    }
+
+    // Moves beside the island, and (compact) takes its height, before the next frame.
+    _queueFollow() {
+        if (this._followId)
+            return;
+        this._followId = global.compositor.get_laters().add(Meta.LaterType.BEFORE_REDRAW, () => {
+            this._followId = 0;
+            this._reposition();
+            if (!this._activityExpanded)
+                this.queue_relayout();
+            return GLib.SOURCE_REMOVE;
+        });
     }
 
     _reposition() {

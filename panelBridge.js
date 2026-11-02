@@ -19,6 +19,7 @@ export class PanelBridge {
         this._settings = settings;
         this._slotFor = null;
         this._borrowed = [];
+        this._alignedMenus = [];
         this._refreshId = 0;
         this._addToPanelBoxDescriptor = null;
         this._untracked = false;
@@ -162,13 +163,57 @@ export class PanelBridge {
             }, this);
         }
 
+        this._alignMenu(indicator);
+
         indicator.connectObject('destroy', () => {
             this._borrowed = this._borrowed.filter(b => b.indicator !== indicator);
         }, this);
     }
 
+    // A menu opens toward the side of the screen its button is on: a button
+    // right of centre gets a menu reaching right, never back over the island.
+    _alignMenu(indicator) {
+        const menu = indicator.menu;
+        if (!menu || !('_arrowAlignment' in menu) || typeof menu.open !== 'function')
+            return;
+
+        const record = {
+            menu,
+            alignment: menu._arrowAlignment,
+            openDescriptor: Object.getOwnPropertyDescriptor(menu, 'open') ?? null,
+        };
+        const open = menu.open;
+        record.wrapper = function (...args) {
+            const source = menu.sourceActor;
+            const monitor = Main.layoutManager.primaryMonitor;
+            if (source && monitor) {
+                const [x] = source.get_transformed_position();
+                const [width] = source.get_transformed_size();
+                menu._arrowAlignment = x + width / 2 >= monitor.x + monitor.width / 2 ? 0 : 1;
+            }
+            return open.apply(this, args);
+        };
+        menu.open = record.wrapper;
+        this._alignedMenus.push(record);
+    }
+
+    _restoreMenus() {
+        for (const {menu, alignment, openDescriptor, wrapper} of this._alignedMenus) {
+            // Leave the menu alone if someone else replaced open() after us.
+            if (menu.open !== wrapper)
+                continue;
+            if (openDescriptor)
+                Object.defineProperty(menu, 'open', openDescriptor);
+            else
+                delete menu.open;
+            menu._arrowAlignment = alignment;
+        }
+        this._alignedMenus = [];
+    }
+
     // Undo in reverse order so every recorded index is valid again.
     _restoreAll() {
+        this._restoreMenus();
         for (const {indicator, container, parent, index} of this._borrowed.reverse()) {
             indicator.disconnectObject(this);
             // bannerBlocked is write-only; the menu closes once unmapped, after we stop listening.

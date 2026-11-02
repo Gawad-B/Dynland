@@ -3,7 +3,9 @@
 
 import Clutter from 'gi://Clutter';
 import Graphene from 'gi://Graphene';
+import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
+import Meta from 'gi://Meta';
 import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -65,9 +67,12 @@ class MorphBox extends St.BoxLayout {
         this._token = 0;
         this._morphTarget = null;
         this._radius = null;
+        this._radiusLaterId = 0;
 
         this.connect('notify::width', () => this._reposition());
-        this.connect('notify::height', () => this._updateRadius());
+        // Height changes arrive mid-layout; restyling there would force a
+        // second layout in the same frame, so round the corners just before the next one.
+        this.connect('notify::height', () => this._queueRadius());
         Main.layoutManager.connectObject('monitors-changed', () => this._reposition(), this);
         St.ThemeContext.get_for_stage(global.stage).connectObject(
             'notify::scale-factor', () => {
@@ -76,7 +81,11 @@ class MorphBox extends St.BoxLayout {
             }, this);
         followStyle(this, settings);
 
-        this.connect('destroy', () => this._token++);
+        this.connect('destroy', () => {
+            this._token++;
+            if (this._radiusLaterId)
+                global.compositor.get_laters().remove(this._radiusLaterId);
+        });
     }
 
     // Content scales from the top centre while fading in.
@@ -247,6 +256,16 @@ class MorphBox extends St.BoxLayout {
                 this._morphTarget = null;
                 this.set_size(-1, -1);
             },
+        });
+    }
+
+    _queueRadius() {
+        if (this._radiusLaterId)
+            return;
+        this._radiusLaterId = global.compositor.get_laters().add(Meta.LaterType.BEFORE_REDRAW, () => {
+            this._radiusLaterId = 0;
+            this._updateRadius();
+            return GLib.SOURCE_REMOVE;
         });
     }
 
