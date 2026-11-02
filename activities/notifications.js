@@ -1,18 +1,26 @@
 // Shows notifications in the island instead of GNOME's banner.
 
 import Clutter from 'gi://Clutter';
+import Pango from 'gi://Pango';
 import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
-import {Urgency} from 'resource:///org/gnome/shell/ui/messageTray.js';
+import * as MessageTray from 'resource:///org/gnome/shell/ui/messageTray.js';
 
 import {Priority} from '../lib/activityManager.js';
 
 export const ID = 'notification';
 const TIMEOUT_MS = 5000;
+// Same cap as GNOME's own banner queue (messageTray.js).
+const MAX_IN_QUEUE = 3;
+const MAX_BODY_CHARS = 300;
 
 export class NotificationsActivity {
     enable(manager) {
+        // Named imports would fail the whole extension on a GNOME that drops one.
+        if (!MessageTray.Urgency)
+            throw new Error('unsupported MessageTray (no Urgency)');
+        this._Urgency = MessageTray.Urgency;
         const tray = Main.messageTray;
         const setBlocked = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(tray), 'bannerBlocked')?.set;
         if (!setBlocked || typeof tray.getSources !== 'function' || !('_bannerBlocked' in tray))
@@ -43,9 +51,15 @@ export class NotificationsActivity {
             'source-added', (_tray, source) => this._watchSource(source),
             'source-removed', (_tray, source) => this._unwatchSource(source),
             this);
+        // Queued notifications wait while a fullscreen window hides the island.
+        global.display.connectObject('in-fullscreen-changed', () => {
+            if (!this._showing && !this._fullscreen())
+                this._showNext();
+        }, this);
     }
 
     disable() {
+        global.display?.disconnectObject(this);
         this._tray.disconnectObject(this);
         for (const source of this._sources)
             source.disconnectObject(this);
@@ -82,9 +96,14 @@ export class NotificationsActivity {
 
     // Same filters as MessageTray._onNotificationRequestBanner.
     _canShow(notification) {
+        const Urgency = this._Urgency;
         if (notification.acknowledged || notification.urgency === Urgency.LOW)
             return false;
         return notification.source.policy.showBanners || notification.urgency === Urgency.CRITICAL;
+    }
+
+    _fullscreen() {
+        return Main.layoutManager.primaryMonitor?.inFullscreen ?? false;
     }
 
     _onBanner(notification) {
@@ -96,7 +115,13 @@ export class NotificationsActivity {
             return;
         }
         if (!this._queue.includes(notification)) {
+            // Like GNOME: when the queue is full only critical ones still get
+            // in; the rest stay in the calendar's list.
+            const full = this._queue.length + (this._showing ? 1 : 0) >= MAX_IN_QUEUE;
+            if (full && notification.urgency !== this._Urgency.CRITICAL)
+                return;
             this._queue.push(notification);
+            this._queue.sort((a, b) => b.urgency - a.urgency);
             notification.connectObject('destroy', () => this._onDestroyed(notification), this);
         }
         if (!this._showing)
@@ -105,6 +130,9 @@ export class NotificationsActivity {
 
     _showNext() {
         this._showing = null;
+        // The island is hidden in fullscreen: keep them queued until it ends.
+        if (this._fullscreen())
+            return;
         while (this._queue.length > 0) {
             const next = this._queue.shift();
             if (this._canShow(next)) {
@@ -121,7 +149,7 @@ export class NotificationsActivity {
         this._manager.request(ID, Priority.NOTIFICATION, {
             compact: () => this._compact(notification),
             expanded: () => this._card(notification),
-            timeoutMs: notification.urgency === Urgency.CRITICAL ? 0 : TIMEOUT_MS,
+            timeoutMs: notification.urgency === this._Urgency.CRITICAL ? 0 : TIMEOUT_MS,
             onEnd: () => {
                 if (this._showing !== notification)
                     return;
@@ -140,6 +168,20 @@ export class NotificationsActivity {
             this._manager.release(ID);
             this._showNext();
         }
+    }
+
+    // Plain text for the card: markup is parsed (entities included) only when
+    // the notification says its body is markup.
+    _bodyText(notification) {
+        let text = notification.body ?? '';
+        if (notification.useBodyMarkup) {
+            try {
+                [, , text] = Pango.parse_markup(text, -1, '');
+            } catch {
+                text = text.replace(/<[^>]*>/g, '');
+            }
+        }
+        return text.length > MAX_BODY_CHARS ? `${text.slice(0, MAX_BODY_CHARS)}…` : text;
     }
 
     _icon(notification, size) {
@@ -178,7 +220,7 @@ export class NotificationsActivity {
             style_class: 'dynland-notification-title',
         }));
         const body = new St.Label({
-            text: (notification.body ?? '').replace(/<[^>]*>/g, ''),
+            text: this._bodyText(notification),
             style_class: 'dynland-notification-body',
         });
         body.clutter_text.line_wrap = true;
