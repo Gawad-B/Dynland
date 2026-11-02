@@ -100,15 +100,26 @@
 
 /* Media */
 .dynland-media-compact { spacing: 10px; }
-.dynland-media-art { border-radius: 6px; }
+.dynland-media-art { border-radius: 6px; background-color: rgba(255, 255, 255, 0.12); }
+.dynland-media-art-small { width: 22px; height: 22px; border-radius: 6px; }
+.dynland-media-art-large { width: 56px; height: 56px; border-radius: 12px; }
 .dynland-media-clock { font-weight: bold; }
-.dynland-media-bars { spacing: 2px; height: 14px; }
-.dynland-media-bar { width: 3px; border-radius: 2px; background-color: #57e389; }
-.dynland-media-card { spacing: 10px; min-width: 380px; }
+.dynland-media-bars { spacing: 2px; height: 16px; }
+.dynland-media-bar {
+  width: 3px;
+  border-radius: 999px;
+  background-gradient-direction: vertical;
+  background-color: #ff4f8b;
+  background-gradient-end: #c061cb;
+}
+.dynland-media-card { spacing: 14px; min-width: 380px; }
 .dynland-media-top { spacing: 12px; }
 .dynland-media-title { font-weight: bold; }
 .dynland-media-artist { color: rgba(255, 255, 255, 0.7); }
-.dynland-media-controls { spacing: 4px; }
+.dynland-media-progress-row { spacing: 10px; }
+.dynland-media-time { color: rgba(255, 255, 255, 0.7); font-size: 0.85em; font-feature-settings: "tnum"; }
+.dynland-media-controls { spacing: 24px; }
+.dynland-media-button { padding: 8px; }
 
 /* Prayer */
 .dynland-prayer-compact { spacing: 8px; font-weight: bold; }

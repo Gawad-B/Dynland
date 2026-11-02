@@ -11,6 +11,7 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import {Island} from './island.js';
 import {PanelBridge} from './panelBridge.js';
 import {ActivityManager} from './lib/activityManager.js';
+import * as Media from './activities/media.js';
 import * as Notifications from './activities/notifications.js';
 import * as Osd from './activities/osd.js';
 import * as Power from './activities/power.js';
@@ -18,6 +19,7 @@ import * as Power from './activities/power.js';
 // Settings key → [activity id, activity class]
 const ACTIVITIES = {
     'activity-notifications': [Notifications.ID, Notifications.NotificationsActivity],
+    'activity-media': [Media.ID, Media.MediaActivity],
     'activity-osd': [Osd.ID, Osd.OsdActivity],
     'activity-power': [Power.ID, Power.PowerActivity],
 };
