@@ -12,10 +12,12 @@ import {Island} from './island.js';
 import {PanelBridge} from './panelBridge.js';
 import {ActivityManager} from './lib/activityManager.js';
 import * as Notifications from './activities/notifications.js';
+import * as Osd from './activities/osd.js';
 
 // Settings key → [activity id, activity class]
 const ACTIVITIES = {
     'activity-notifications': [Notifications.ID, Notifications.NotificationsActivity],
+    'activity-osd': [Osd.ID, Osd.OsdActivity],
 };
 
 // Idle pill (36px) + top margin (6px) + gap (6px), in logical pixels.

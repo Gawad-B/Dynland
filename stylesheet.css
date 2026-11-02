@@ -116,3 +116,7 @@
 .dynland-prayer-list { spacing: 4px; min-width: 200px; }
 .dynland-prayer-row { spacing: 24px; }
 .dynland-prayer-next { color: #f6d32d; font-weight: bold; }
+
+/* Volume and brightness */
+.dynland-osd { spacing: 10px; }
+.dynland-level-label { min-width: 24px; text-align: right; font-weight: bold; }
