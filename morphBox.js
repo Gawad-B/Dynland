@@ -173,9 +173,13 @@ class MorphBox extends St.BoxLayout {
         for (const actor of this._containers())
             actor.remove_all_transitions();
 
-        if (key === this._shownKey) {
-            // Back to what is already on screen (rapid toggling): no fades.
+        if (key === this._shownKey || !this._fadeBetween(this._shownKey, key)) {
+            // Back to what is already on screen (rapid toggling), or a change
+            // the subclass wants unfaded: swap now, the moving edge reveals it.
+            // Pin the current size first: once the content changes, Clutter
+            // reports the new natural size as `width` and there is nothing to ease.
             this._pending = false;
+            this.set_size(this.width, this.height);
             this._resetContent();
             this._applyAndRecord();
             this._morph(true);
@@ -233,6 +237,14 @@ class MorphBox extends St.BoxLayout {
                 mode: Clutter.AnimationMode.EASE_OUT_QUAD,
             });
         }
+    }
+
+    /**
+     * Optional override: false to swap content at once between these states,
+     * letting the shape's moving edge reveal or hide it instead of fading.
+     */
+    _fadeBetween(_fromKey, _toKey) {
+        return true;
     }
 
     /**

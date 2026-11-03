@@ -319,8 +319,16 @@ class Island extends MorphBox {
         }
     }
 
+    // Closing into the empty pill snaps: a shrinking shape with its content
+    // already gone would be the empty pill again.
     _motionAllowed() {
-        return !this._instant && super._motionAllowed();
+        return !this._instant && this._stateKey() !== 'mini' && super._motionAllowed();
+    }
+
+    // The empty fullscreen pill opens like the iPhone island: the content is
+    // there at once and the growing shape uncovers it (no empty, growing pill).
+    _fadeBetween(fromKey, toKey) {
+        return fromKey !== 'mini' && toKey !== 'mini';
     }
 
     _visibleIn(key) {
