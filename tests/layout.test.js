@@ -54,3 +54,9 @@ test('Quick Settings stays in the corner even when listed as idle', () => {
     assertEqual(r.corner, ['screenSharing', 'quickSettings']);
     assertEqual(r.idle, []);
 });
+
+test('cornerInIsland puts Quick Settings at the end of the first page', () => {
+    const r = splitIndicators(PANEL, {...DEFAULTS, cornerInIsland: true});
+    assertEqual(r.corner, []);
+    assertEqual(r.home, ['keyboard', 'clipboardIndicator', 'appindicator-2', 'appindicator-1', 'screenSharing', 'quickSettings']);
+});
