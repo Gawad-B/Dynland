@@ -79,10 +79,9 @@ export default class DynlandExtension extends Extension {
 
         // On the stage before indicators move in, so they never lay out off-stage.
         // The bubbles go on top: an opened card can reach over the corner pill.
-        // The corner and bubbles hide themselves, so they follow fullscreen on
-        // their own (GNOME's tracking would show them again).
-        Main.layoutManager.addChrome(this._island, {affectsStruts: false, trackFullscreen: true});
-        for (const actor of [this._corner, ...this._bubbles])
+        // All of them follow fullscreen on their own: GNOME's tracking would show
+        // hidden ones again, and the island stays as a mini pill over fullscreen.
+        for (const actor of [this._island, this._corner, ...this._bubbles])
             Main.layoutManager.addChrome(actor, {affectsStruts: false, trackFullscreen: false});
         this._bridge.enable(name => name === 'corner' ? this._corner.slot() : this._island.slot(name));
 

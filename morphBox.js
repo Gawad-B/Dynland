@@ -38,15 +38,24 @@ export function motionAllowed(settings) {
  */
 export function followFullscreen(actor, wanted) {
     const sync = () => {
-        const monitor = Main.layoutManager.primaryMonitor;
-        const fullscreen = global.window_group.visible && !!monitor?.inFullscreen;
-        actor.visible = wanted() && !fullscreen;
+        actor.visible = wanted() && !inFullscreen();
     };
-    // Connected after LayoutManager's handlers, so inFullscreen is already up to date.
-    global.display.connectObject('in-fullscreen-changed', sync, actor);
-    Main.overview.connectObject('showing', sync, 'hidden', sync, actor);
-    Main.layoutManager.connectObject('monitors-changed', sync, actor);
+    onFullscreenChange(actor, sync);
     return sync;
+}
+
+/** True while a fullscreen window covers the primary monitor (not in the overview). */
+export function inFullscreen() {
+    const monitor = Main.layoutManager.primaryMonitor;
+    return global.window_group.visible && !!monitor?.inFullscreen;
+}
+
+/** Calls `fn` whenever inFullscreen() may have changed, for as long as `actor` lives. */
+export function onFullscreenChange(actor, fn) {
+    // Connected after LayoutManager's handlers, so inFullscreen is already up to date.
+    global.display.connectObject('in-fullscreen-changed', fn, actor);
+    Main.overview.connectObject('showing', fn, 'hidden', fn, actor);
+    Main.layoutManager.connectObject('monitors-changed', fn, actor);
 }
 
 /**
