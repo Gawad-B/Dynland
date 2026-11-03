@@ -12,7 +12,7 @@ import {splitIndicators} from './lib/layout.js';
 const LAYOUT_KEYS = [
     'show-clock', 'show-quick-settings', 'show-activities',
     'show-tray-indicators', 'idle-indicators', 'home-indicators',
-    // Windows not kept below the island: Quick Settings moves into it.
+    // Windows not kept below the island: Quick Settings moves to its second page.
     'reserve-space',
 ];
 
