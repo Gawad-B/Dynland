@@ -1,5 +1,6 @@
 // Dynland: a dynamic island that replaces the GNOME top bar.
 
+import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
@@ -115,8 +116,35 @@ export default class DynlandExtension extends Extension {
         const describe = w => w ? `${w.get_wm_class()} "${w.get_title()}" on ws ${w.get_workspace()?.index()}` : 'none';
         global.workspace_manager.connectObject('active-workspace-changed', manager => {
             const stack = new Error().stack.split('\n').slice(1, 12).join(' <- ');
+            const anim = Main.wm._workspaceAnimation;
+            console.log(`Dynland debug: animation gesture ${anim?.gestureActive} tracker ${anim?._swipeTracker?._state}`);
             console.log(`Dynland debug: switched to ws ${manager.get_active_workspace_index()}; ` +
                 `focus ${describe(global.display.focus_window)}; stack: ${stack || '(none)'}`);
+        }, this);
+        // Raw touchpad gestures, to tell a real reverse swipe from one GNOME synthesises.
+        const names = {
+            [Clutter.EventType.TOUCHPAD_SWIPE]: 'swipe',
+            [Clutter.EventType.TOUCHPAD_HOLD]: 'hold',
+            [Clutter.EventType.TOUCHPAD_PINCH]: 'pinch',
+        };
+        const phases = ['begin', 'update', 'end', 'cancel'];
+        let sum = [0, 0];
+        global.stage.connectObject('captured-event', (_stage, event) => {
+            const name = names[event.type()];
+            if (!name)
+                return Clutter.EVENT_PROPAGATE;
+            const phase = phases[event.get_gesture_phase()] ?? event.get_gesture_phase();
+            const [dx, dy] = event.get_gesture_motion_delta?.() ?? [0, 0];
+            if (phase === 'update') {
+                sum = [sum[0] + dx, sum[1] + dy];
+                return Clutter.EVENT_PROPAGATE;
+            }
+            const tracker = Main.wm._workspaceAnimation?._swipeTracker;
+            console.log(`Dynland debug: touchpad ${name} ${phase}, ${event.get_touchpad_gesture_finger_count()} fingers, ` +
+                `moved ${sum.map(v => v.toFixed(0)).join(',')}; tracker state ${tracker?._state} enabled ${tracker?.enabled}`);
+            if (phase !== 'begin')
+                sum = [0, 0];
+            return Clutter.EVENT_PROPAGATE;
         }, this);
         global.display.connectObject(
             'window-demands-attention', (_d, w) => console.log(`Dynland debug: demands attention: ${describe(w)}`),
@@ -134,6 +162,7 @@ export default class DynlandExtension extends Extension {
         this._settings?.disconnectObject(this);
         global.workspace_manager.disconnectObject(this);
         global.display.disconnectObject(this);
+        global.stage.disconnectObject(this);
         Main.layoutManager.disconnectObject(this);
         St.ThemeContext.get_for_stage(global.stage).disconnectObject(this);
 
