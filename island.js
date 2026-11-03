@@ -5,6 +5,7 @@
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
+import Meta from 'gi://Meta';
 import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -13,7 +14,9 @@ import {MorphBox, TOP_MARGIN, followFullscreen, followStyle, scaleFactor} from '
 
 const HOVER_EXPAND_MS = 120;
 const LEAVE_COLLAPSE_MS = 350;
-const PAGE_SCROLL_COOLDOWN_MS = 350;
+const SCROLL_COOLDOWN_MS = 350; // after a step, wheel clicks wait this long
+const GESTURE_IDLE_MS = 250; // a touchpad swipe has ended after this long without events
+const SCROLL_STEP_DELTA = 1; // smooth scroll units (one wheel click) per step
 
 const HOME = 0;
 const MORE = 1;
@@ -34,6 +37,9 @@ class Island extends MorphBox {
         this._compact = false;
         this._hoverTimeoutId = 0;
         this._scrollCooldownId = 0;
+        this._gestureTimeoutId = 0;
+        this._gestureSpent = false;
+        this._scrollAccumulated = 0;
 
         this._slots = {
             left: new St.BoxLayout({style_class: 'dynland-slot'}),
@@ -94,10 +100,13 @@ class Island extends MorphBox {
         this.add_action_full('dynland-toggle', Clutter.EventPhase.TARGET, this._clickGesture);
 
         this.connect('notify::hover', () => this._onHover());
+        this.connect('captured-event', (_actor, event) => this._onCapturedEvent(event));
         this.connect('destroy', () => {
             this._clearHoverTimeout();
             if (this._scrollCooldownId)
                 GLib.source_remove(this._scrollCooldownId);
+            if (this._gestureTimeoutId)
+                GLib.source_remove(this._gestureTimeoutId);
         });
         this._render();
     }
@@ -134,42 +143,104 @@ class Island extends MorphBox {
         this._render();
     }
 
-    vfunc_scroll_event(event) {
-        if (!this._expanded || !this._hasMore())
-            return Main.wm.handleWorkspaceScroll(event);
+    // Every scroll over the island comes here first (capture phase), so the
+    // workspace dots' own handler never sees it: one swipe, one step.
+    _onCapturedEvent(event) {
+        if (event.type() !== Clutter.EventType.SCROLL)
+            return Clutter.EVENT_PROPAGATE;
 
+        const step = this._scrollStep(event);
+        if (step) {
+            const target = global.stage.get_event_actor(event);
+            // Expanded with a second page: scroll flips pages, except over the workspace dots.
+            if (this._expanded && this._hasMore() && !this._slots.left.contains(target))
+                this._setPage((this._page + step + 2) % 2); // two pages: past either end wraps
+            else
+                this._switchWorkspace(step);
+            this._startScrollCooldown();
+        }
+        return Clutter.EVENT_STOP;
+    }
+
+    // -1, +1, or 0 for an event that should not move anything. A touchpad
+    // swipe sends a stream of smooth events plus wheel-click copies of them
+    // (flagged as emulated); only the first real step of a swipe counts, so
+    // the fingers lifting (often a small reverse motion) cannot step back.
+    _scrollStep(event) {
+        if (event.get_flags() & Clutter.EventFlags.FLAG_POINTER_EMULATED)
+            return 0;
+
+        const direction = event.get_scroll_direction();
+        if (direction !== Clutter.ScrollDirection.SMOOTH) {
+            if (this._scrollCooldownId)
+                return 0;
+            switch (direction) {
+            case Clutter.ScrollDirection.LEFT:
+            case Clutter.ScrollDirection.UP:
+                return -1;
+            case Clutter.ScrollDirection.RIGHT:
+            case Clutter.ScrollDirection.DOWN:
+                return 1;
+            default:
+                return 0;
+            }
+        }
+
+        // Smooth: a swipe ends with a finish event, or when events stop coming.
+        this._restartGestureTimeout();
+        if (event.get_scroll_finish_flags() !== Clutter.ScrollFinishFlags.NONE) {
+            this._endGesture();
+            return 0;
+        }
+        if (this._gestureSpent || this._scrollCooldownId)
+            return 0;
+        const [dx, dy] = event.get_scroll_delta();
+        this._scrollAccumulated += Math.abs(dx) > Math.abs(dy) ? dx : dy;
+        if (Math.abs(this._scrollAccumulated) < SCROLL_STEP_DELTA)
+            return 0;
+        const step = Math.sign(this._scrollAccumulated);
+        this._scrollAccumulated = 0;
+        this._gestureSpent = true;
+        return step;
+    }
+
+    _switchWorkspace(step) {
+        const manager = global.workspace_manager;
+        const active = manager.get_active_workspace();
+        const vertical = manager.layout_rows === -1;
+        const rtl = Clutter.get_default_text_direction() === Clutter.TextDirection.RTL;
+        let direction;
+        if (vertical)
+            direction = step > 0 ? Meta.MotionDirection.DOWN : Meta.MotionDirection.UP;
+        else
+            direction = (step > 0) !== rtl ? Meta.MotionDirection.RIGHT : Meta.MotionDirection.LEFT;
+        const target = active.get_neighbor(direction);
+        if (target !== active)
+            Main.wm.actionMoveWorkspace(target);
+    }
+
+    _startScrollCooldown() {
         if (this._scrollCooldownId)
-            return Clutter.EVENT_STOP;
-
-        let step = 0;
-        switch (event.get_scroll_direction()) {
-        case Clutter.ScrollDirection.LEFT:
-        case Clutter.ScrollDirection.UP:
-            step = -1;
-            break;
-        case Clutter.ScrollDirection.RIGHT:
-        case Clutter.ScrollDirection.DOWN:
-            step = 1;
-            break;
-        case Clutter.ScrollDirection.SMOOTH: {
-            const [dx, dy] = event.get_scroll_delta();
-            const d = Math.abs(dx) > Math.abs(dy) ? dx : dy;
-            if (Math.abs(d) >= 0.5)
-                step = Math.sign(d);
-            break;
-        }
-        }
-        if (!step)
-            return Clutter.EVENT_STOP;
-
-        // Two pages: scrolling past either end wraps to the other one.
-        this._setPage((this._page + step + 2) % 2);
-        // Touchpads keep sending events after a swipe; one swipe, one page.
-        this._scrollCooldownId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, PAGE_SCROLL_COOLDOWN_MS, () => {
+            GLib.source_remove(this._scrollCooldownId);
+        this._scrollCooldownId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, SCROLL_COOLDOWN_MS, () => {
             this._scrollCooldownId = 0;
             return GLib.SOURCE_REMOVE;
         });
-        return Clutter.EVENT_STOP;
+    }
+
+    _restartGestureTimeout() {
+        if (this._gestureTimeoutId)
+            GLib.source_remove(this._gestureTimeoutId);
+        this._gestureTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, GESTURE_IDLE_MS, () => {
+            this._gestureTimeoutId = 0;
+            this._endGesture();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _endGesture() {
+        this._gestureSpent = false;
+        this._scrollAccumulated = 0;
     }
 
     _setPage(page) {
