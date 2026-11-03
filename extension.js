@@ -86,6 +86,8 @@ export default class DynlandExtension extends Extension {
         this._bridge.enable(name => name === 'corner' ? this._corner.slot() : this._island.slot(name));
 
         this._updateStrut();
+        if (this._settings.get_boolean('debug-workspace-log'))
+            this._logWorkspaceSwitches();
         this._settings.connectObject('changed::reserve-space', () => this._updateStrut(), this);
         Main.layoutManager.connectObject('monitors-changed', () => this._updateStrut(), this);
         St.ThemeContext.get_for_stage(global.stage).connectObject(
@@ -107,6 +109,22 @@ export default class DynlandExtension extends Extension {
             console.warn(`Dynland: could not register the "${KEYBINDING}" shortcut`);
     }
 
+    // Debugging aid: logs each workspace switch with the JS call stack that
+    // caused it (empty when Mutter itself did, e.g. a window activating).
+    _logWorkspaceSwitches() {
+        const describe = w => w ? `${w.get_wm_class()} "${w.get_title()}" on ws ${w.get_workspace()?.index()}` : 'none';
+        global.workspace_manager.connectObject('active-workspace-changed', manager => {
+            const stack = new Error().stack.split('\n').slice(1, 12).join(' <- ');
+            console.log(`Dynland debug: switched to ws ${manager.get_active_workspace_index()}; ` +
+                `focus ${describe(global.display.focus_window)}; stack: ${stack || '(none)'}`);
+        }, this);
+        global.display.connectObject(
+            'window-demands-attention', (_d, w) => console.log(`Dynland debug: demands attention: ${describe(w)}`),
+            'window-marked-urgent', (_d, w) => console.log(`Dynland debug: urgent: ${describe(w)}`),
+            'notify::focus-window', () => console.log(`Dynland debug: focus -> ${describe(global.display.focus_window)}`),
+            this);
+    }
+
     // Tolerates any partially initialised state (also called after a failed enable()).
     disable() {
         if (this._keybound) {
@@ -114,6 +132,8 @@ export default class DynlandExtension extends Extension {
             this._keybound = false;
         }
         this._settings?.disconnectObject(this);
+        global.workspace_manager.disconnectObject(this);
+        global.display.disconnectObject(this);
         Main.layoutManager.disconnectObject(this);
         St.ThemeContext.get_for_stage(global.stage).disconnectObject(this);
 

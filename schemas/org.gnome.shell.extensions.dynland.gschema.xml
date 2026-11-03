@@ -85,5 +85,9 @@
       <default>-1</default>
       <summary>Testing only: pretend the next prayer is this many minutes after enable (-1 = off)</summary>
     </key>
+    <key name="debug-workspace-log" type="b">
+      <default>false</default>
+      <summary>Debugging only: log every workspace switch, who caused it and the focused window</summary>
+    </key>
   </schema>
 </schemalist>
