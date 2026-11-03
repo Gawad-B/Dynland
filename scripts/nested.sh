@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Runs GNOME Shell in a nested window with Dynland enabled. The nested shell
+# Runs GNOME Shell in a nested window with Dynland enabled. With
+# DYNLAND_HEADLESS=1 it runs headless on a 1920x1080 virtual monitor instead:
+# nothing appears on screen and the frame clock never stalls, so animations run
+# at real speed and screenshots catch them mid-flight. The nested shell
 # gets its own config, data and cache folders under .nested/, so the real
 # session's settings, extension data and caches are never written. Your other
 # currently enabled extensions are enabled in the nested shell too, to test
@@ -19,7 +22,7 @@ if (( avail < 1200 )); then
     echo "Only ${avail} MB RAM available; the nested shell needs about 1.2 GB. Close something first." >&2
     exit 1
 fi
-if pgrep -f '^gnome-shell --devkit' >/dev/null; then
+if pgrep -f '^gnome-shell --(devkit|headless)' >/dev/null; then
     echo "A nested shell is already running." >&2
     exit 1
 fi
@@ -53,6 +56,11 @@ export XDG_DATA_HOME="$data_home"
 export XDG_CACHE_HOME="$state/cache"
 export DYNLAND_STATE="$state" DYNLAND_HOST_EXTENSIONS="$host_extensions"
 export DYNLAND_EXTRA="$uuid $devtools"
+if [[ ${DYNLAND_HEADLESS:-} == 1 ]]; then
+    export DYNLAND_SHELL_ARGS="--headless --virtual-monitor 1920x1080 --wayland --no-x11"
+else
+    export DYNLAND_SHELL_ARGS="--devkit --wayland"
+fi
 
 exec dbus-run-session -- bash -c '
     echo "$DBUS_SESSION_BUS_ADDRESS" > "$DYNLAND_STATE/bus"
@@ -66,5 +74,5 @@ print(repr(l))")
     gsettings set org.gnome.shell enabled-extensions "$list"
     gsettings set org.gnome.shell disable-user-extensions false
     gsettings set org.gnome.shell welcome-dialog-last-shown-version '"'"'99.0'"'"'
-    gnome-shell --devkit --wayland > "$DYNLAND_STATE/shell.log" 2>&1
+    gnome-shell $DYNLAND_SHELL_ARGS > "$DYNLAND_STATE/shell.log" 2>&1
 '

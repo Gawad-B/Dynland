@@ -39,3 +39,10 @@ The prayer countdown needs the Prayer Times extension (prayer-times@gawad-b.gith
 (under `.nested/`), so the real session is never touched. It also loads
 `tools/dynland-devtools@gawad-b.github.io`, which turns on unsafe mode for the Eval and
 screenshot helper scripts. Never install that extension in a real session.
+
+The nested window's frame clock stalls when it isn't on screen, which freezes every
+animation. For anything timing-related run it headless instead:
+`DYNLAND_HEADLESS=1 ./scripts/nested.sh` renders to a 1920x1080 virtual monitor with a
+real frame clock. `tests/manual/test-window.js` opens a red window in it (pass the
+shell's `WAYLAND_DISPLAY`) to maximise or fullscreen from `scripts/nested-eval.sh`;
+`St.Settings.get().slow_down_factor = 10` slows animations enough to screenshot them.

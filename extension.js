@@ -86,6 +86,7 @@ export default class DynlandExtension extends Extension {
         this._bridge.enable(name => name === 'corner' ? this._corner.slot() : this._island.slot(name));
 
         this._updateStrut();
+        this._keepWindowSnapshotsBelowChrome();
         if (this._settings.get_boolean('debug-workspace-log'))
             this._logWorkspaceSwitches();
         this._settings.connectObject('changed::reserve-space', () => this._updateStrut(), this);
@@ -166,6 +167,29 @@ export default class DynlandExtension extends Extension {
             this);
     }
 
+    // GNOME animates a window's maximise, unmaximise, fullscreen and
+    // unfullscreen with a snapshot of its old frame, added on top of the whole
+    // UI (above the island and the dock) and faded out over 250 ms. With
+    // windows reaching under the island, that snapshot hid the island and
+    // faded it back in on every F11. Keep those snapshots just above the
+    // windows, below everything else.
+    _keepWindowSnapshotsBelowChrome() {
+        const resizing = Main.wm._resizing;
+        if (!(resizing instanceof Set))
+            return;
+        const debug = this._settings.get_boolean('debug-workspace-log');
+        Main.uiGroup.connectObject('child-added', (group, child) => {
+            for (const actor of resizing) {
+                if (actor.__animationInfo?.clone !== child)
+                    continue;
+                group.set_child_above_sibling(child, global.window_group);
+                if (debug)
+                    console.log(`Dynland debug: kept the size-change snapshot of "${actor.meta_window?.get_title()}" below the island`);
+                return;
+            }
+        }, this);
+    }
+
     // Tolerates any partially initialised state (also called after a failed enable()).
     disable() {
         if (this._keybound) {
@@ -173,6 +197,7 @@ export default class DynlandExtension extends Extension {
             this._keybound = false;
         }
         this._settings?.disconnectObject(this);
+        Main.uiGroup.disconnectObject(this);
         global.workspace_manager.disconnectObject(this);
         global.display.disconnectObject(this);
         global.stage.disconnectObject(this);
