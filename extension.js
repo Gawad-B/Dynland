@@ -149,6 +149,12 @@ export default class DynlandExtension extends Extension {
             'window-demands-attention', (_d, w) => console.log(`Dynland debug: demands attention: ${describe(w)}`),
             'window-marked-urgent', (_d, w) => console.log(`Dynland debug: urgent: ${describe(w)}`),
             'notify::focus-window', () => console.log(`Dynland debug: focus -> ${describe(global.display.focus_window)}`),
+            'in-fullscreen-changed', () => console.log(`Dynland debug: fullscreen changed: ${Main.layoutManager.primaryMonitor?.inFullscreen}; ` +
+                `island mini ${this._island?._mini} visible ${this._island?.visible}`),
+            this);
+        // A loop of these while fullscreen points at the pointer opening and closing the island.
+        this._island.connectObject(
+            'notify::hover', island => console.log(`Dynland debug: island hover ${island.hover}, expanded ${island.expanded}, mini ${island._mini}`),
             this);
     }
 

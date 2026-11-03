@@ -36,6 +36,7 @@ class Island extends MorphBox {
         this._page = HOME;
         this._compact = false;
         this._mini = false;
+        this._instant = false; // the next render skips motion
         this._hoverTimeoutId = 0;
         this._scrollCooldownId = 0;
         this._gestureTimeoutId = 0;
@@ -306,8 +307,20 @@ class Island extends MorphBox {
         if (mini === this._mini)
             return;
         this._mini = mini;
-        this.setExpanded(false);
-        this._render();
+        // Entering or leaving fullscreen snaps between the pill and the island:
+        // GNOME is already animating the window, and a fade-then-shrink here
+        // showed an empty pill for a frame each time.
+        this._instant = true;
+        try {
+            this.setExpanded(false);
+            this._render();
+        } finally {
+            this._instant = false;
+        }
+    }
+
+    _motionAllowed() {
+        return !this._instant && super._motionAllowed();
     }
 
     _visibleIn(key) {
