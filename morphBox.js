@@ -182,10 +182,15 @@ class MorphBox extends St.BoxLayout {
             return;
         }
 
-        // Phase 1: hold the old size, fade the old content out.
+        // Containers shown in both states stay put: fading them out and back
+        // in leaves an empty pill for a frame.
+        const next = new Set(this._visibleIn?.(key) ?? []);
+        this._stayed = new Set(this._containers().filter(a => a.visible && next.has(a)));
+
+        // Phase 1: hold the old size, fade out only the content that leaves.
         this._pending = true;
         this.set_size(this.width, this.height);
-        const outgoing = this._containers().filter(a => a.visible);
+        const outgoing = this._containers().filter(a => a.visible && !this._stayed.has(a));
         outgoing.forEach((actor, i) => {
             actor.ease({
                 opacity: 0,
@@ -211,7 +216,8 @@ class MorphBox extends St.BoxLayout {
         if (token !== this._token)
             return;
 
-        const incoming = this._containers().filter(a => a.visible);
+        const incoming = this._containers().filter(a => a.visible && !this._stayed?.has(a));
+        this._stayed = null;
         for (const actor of incoming) {
             actor.opacity = 0;
             actor.set_scale(CONTENT_IN_SCALE, CONTENT_IN_SCALE);
@@ -227,6 +233,17 @@ class MorphBox extends St.BoxLayout {
                 mode: Clutter.AnimationMode.EASE_OUT_QUAD,
             });
         }
+    }
+
+    /**
+     * Optional override: the containers visible in state `key`, so those
+     * already showing can stay through the transition instead of fading.
+     *
+     * @param {string} _key
+     * @returns {Clutter.Actor[]}
+     */
+    _visibleIn(_key) {
+        return [];
     }
 
     _applyAndRecord() {

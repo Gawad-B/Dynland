@@ -310,6 +310,19 @@ class Island extends MorphBox {
         this._render();
     }
 
+    _visibleIn(key) {
+        switch (key) {
+        case 'mini':
+            return [];
+        case 'more':
+            return [this._moreRow, this._dots];
+        case 'home':
+            return this._hasMore() ? [this._homeRow, this._dots] : [this._homeRow];
+        default: // idle, compact
+            return [this._homeRow];
+        }
+    }
+
     _stateKey() {
         if (!this._expanded)
             return this._mini ? 'mini' : this._compact ? 'compact' : 'idle';
