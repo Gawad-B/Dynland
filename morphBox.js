@@ -19,6 +19,7 @@ const CONTENT_IN_DELAY_MS = 70;
 const CONTENT_IN_SCALE = 0.97;
 const EXPANDED_RADIUS = 24; // CSS px: St scales inline px by the theme scale factor
 export const TOP_MARGIN = 6;
+const FULLSCREEN_EXIT_SETTLE_MS = 1500;
 
 export function scaleFactor() {
     return St.ThemeContext.get_for_stage(global.stage).scale_factor;
@@ -52,10 +53,37 @@ export function inFullscreen() {
 
 /** Calls `fn` whenever inFullscreen() may have changed, for as long as `actor` lives. */
 export function onFullscreenChange(actor, fn) {
+    // Apps briefly drop out of fullscreen when they put a small window above
+    // their fullscreen one (a browser's "Press Esc to exit" notice): Mutter
+    // reports "not fullscreen" for that moment. Entering fullscreen applies at
+    // once; leaving it only once it has lasted, so nothing flashes.
+    let timeoutId = 0;
+    const cancel = () => {
+        if (timeoutId)
+            GLib.source_remove(timeoutId);
+        timeoutId = 0;
+    };
+    const onDisplayChange = () => {
+        cancel();
+        if (inFullscreen()) {
+            fn();
+            return;
+        }
+        timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, FULLSCREEN_EXIT_SETTLE_MS, () => {
+            timeoutId = 0;
+            fn();
+            return GLib.SOURCE_REMOVE;
+        });
+    };
+    const now = () => {
+        cancel();
+        fn();
+    };
     // Connected after LayoutManager's handlers, so inFullscreen is already up to date.
-    global.display.connectObject('in-fullscreen-changed', fn, actor);
-    Main.overview.connectObject('showing', fn, 'hidden', fn, actor);
-    Main.layoutManager.connectObject('monitors-changed', fn, actor);
+    global.display.connectObject('in-fullscreen-changed', onDisplayChange, actor);
+    Main.overview.connectObject('showing', now, 'hidden', now, actor);
+    Main.layoutManager.connectObject('monitors-changed', now, actor);
+    actor.connect('destroy', cancel);
 }
 
 /**
