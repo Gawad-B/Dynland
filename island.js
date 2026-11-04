@@ -292,6 +292,41 @@ class Island extends MorphBox {
         return this._expanded && this._page === MORE && this._hasMore();
     }
 
+    // The slots come and go inside the rows (the home page's indicators,
+    // the idle ones while compact); they fade while the row itself stays.
+    _parts() {
+        return [this._slots.left, this._slots.center, this._slots.idle, this._slots.home];
+    }
+
+    _partsVisibleIn(key) {
+        return this._parts().filter(slot => {
+            if (slot.get_n_children() === 0)
+                return false;
+            if (slot === this._slots.idle)
+                return key !== 'compact';
+            if (slot === this._slots.home)
+                return key === 'home';
+            return true;
+        });
+    }
+
+    // While the shape morphs it can be narrower than a row's content; give
+    // the row its full width anyway (centred, clipped by the island) instead
+    // of letting the box squeeze it and ellipsize its labels.
+    vfunc_allocate(box) {
+        super.vfunc_allocate(box);
+        for (const row of [this._homeRow, this._moreRow]) {
+            if (!row.visible)
+                continue;
+            const [, natural] = row.get_preferred_width(-1);
+            const current = row.get_allocation_box();
+            if (natural <= current.get_width())
+                continue;
+            const x1 = Math.floor((current.x1 + current.x2 - natural) / 2);
+            row.allocate(Clutter.ActorBox.new(x1, current.y1, x1 + natural, current.y2));
+        }
+    }
+
     _visibleIn(key) {
         switch (key) {
         case 'more':

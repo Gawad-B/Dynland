@@ -122,10 +122,38 @@ class MorphBox extends St.BoxLayout {
     }
 
     _resetContent() {
-        for (const actor of this._containers()) {
+        for (const actor of [...this._containers(), ...this._parts()]) {
             actor.remove_all_transitions();
             actor.opacity = 255;
             actor.set_scale(1, 1);
+            actor.translation_x = 0;
+        }
+    }
+
+    // A centred container that stays visible through a content swap would
+    // re-centre around its new content in one frame (everything in it jumps
+    // sideways). Note where it is, then after the swap start it at that same
+    // place and let it glide to its new one in step with the shape.
+    _carryBefore() {
+        return this._containers()
+            .filter(a => a.visible && a.x_align === Clutter.ActorAlign.CENTER)
+            .map(actor => ({actor, width: actor.width, translation: actor.translation_x}));
+    }
+
+    _carryAfter(carried) {
+        for (const {actor, width, translation} of carried) {
+            if (!actor.visible)
+                continue;
+            const [, natural] = actor.get_preferred_width(-1);
+            const offset = Math.round((natural - width) / 2 + translation);
+            if (!offset)
+                continue;
+            actor.translation_x = offset;
+            actor.ease({
+                translation_x: 0,
+                duration: MORPH_MS,
+                mode: Clutter.AnimationMode.EASE_OUT_CUBIC,
+            });
         }
     }
 
@@ -161,14 +189,16 @@ class MorphBox extends St.BoxLayout {
         const token = ++this._token;
         this._targetKey = key;
         this._stopMorph();
-        for (const actor of this._containers())
+        for (const actor of [...this._containers(), ...this._parts()])
             actor.remove_all_transitions();
 
         if (key === this._shownKey) {
             // Back to what is already on screen (rapid toggling): no fades.
+            const carried = this._carryBefore();
             this._pending = false;
             this._resetContent();
             this._applyAndRecord();
+            this._carryAfter(carried);
             this._morph(true);
             return;
         }
@@ -178,11 +208,15 @@ class MorphBox extends St.BoxLayout {
         const next = new Set(this._visibleIn?.(key) ?? []);
         this._stayed = new Set(this._containers().filter(a => a.visible && next.has(a)));
 
-        // Phase 1: hold the old size, fade out only the content that leaves.
+        // Phase 1: hold the old size, fade out only the content that leaves:
+        // whole containers, and parts of the containers that stay.
         this._pending = true;
         this.set_size(this.width, this.height);
         const outgoing = this._containers().filter(a => a.visible && !this._stayed.has(a));
-        outgoing.forEach((actor, i) => {
+        const nextParts = new Set(this._partsVisibleIn(key));
+        const leaving = this._parts().filter(p =>
+            p.visible && !nextParts.has(p) && this._stayed.has(p.get_parent()));
+        [...outgoing, ...leaving].forEach((actor, i) => {
             actor.ease({
                 opacity: 0,
                 duration: CONTENT_OUT_MS,
@@ -193,7 +227,7 @@ class MorphBox extends St.BoxLayout {
                 } : null,
             });
         });
-        if (!outgoing.length)
+        if (!outgoing.length && !leaving.length)
             this._swapIn(token);
     }
 
@@ -202,17 +236,25 @@ class MorphBox extends St.BoxLayout {
         if (token !== this._token)
             return;
         this._pending = false;
+        const carried = this._carryBefore();
+        const partsBefore = new Set(this._parts().filter(p => p.visible));
         this._resetContent();
         this._applyAndRecord();
         if (token !== this._token)
             return;
 
-        const incoming = this._containers().filter(a => a.visible && !this._stayed?.has(a));
+        const stayed = this._stayed;
         this._stayed = null;
+        const incoming = this._containers().filter(a => a.visible && !stayed?.has(a));
+        const arriving = this._parts().filter(p =>
+            p.visible && !partsBefore.has(p) && stayed?.has(p.get_parent()));
         for (const actor of incoming) {
             actor.opacity = 0;
             actor.set_scale(CONTENT_IN_SCALE, CONTENT_IN_SCALE);
         }
+        for (const actor of arriving)
+            actor.opacity = 0;
+        this._carryAfter(carried);
         this._morph(true);
         for (const actor of incoming) {
             actor.ease({
@@ -224,6 +266,34 @@ class MorphBox extends St.BoxLayout {
                 mode: Clutter.AnimationMode.EASE_OUT_QUAD,
             });
         }
+        for (const actor of arriving) {
+            actor.ease({
+                opacity: 255,
+                duration: CONTENT_IN_MS,
+                delay: CONTENT_IN_DELAY_MS,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+            });
+        }
+    }
+
+    /**
+     * Optional override: actors inside the containers that appear and
+     * disappear on their own while their container stays (they fade).
+     *
+     * @returns {Clutter.Actor[]}
+     */
+    _parts() {
+        return [];
+    }
+
+    /**
+     * Optional override: which of _parts() state `key` shows.
+     *
+     * @param {string} _key
+     * @returns {Clutter.Actor[]}
+     */
+    _partsVisibleIn(_key) {
+        return this._parts();
     }
 
     /**
