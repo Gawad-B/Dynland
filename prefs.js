@@ -58,7 +58,7 @@ export default class DynlandPreferences extends ExtensionPreferences {
 
         page.add(group('Functions', [
             switchRow(settings, 'show-clock', 'Clock', 'Opens the calendar and notification list'),
-            switchRow(settings, 'show-quick-settings', 'Quick Settings', 'Wi-Fi, volume, battery and power, in their own pill at the top-right'),
+            switchRow(settings, 'show-quick-settings', 'Quick Settings', 'Wi-Fi, volume, battery and power, on the island\'s second page'),
             switchRow(settings, 'show-activities', 'Activities and workspaces', 'The workspace dots'),
             switchRow(settings, 'show-tray-indicators', 'Other indicators', 'Extension and tray icons, shown on the expanded pages'),
         ]));

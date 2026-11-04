@@ -12,8 +12,6 @@ import {splitIndicators} from './lib/layout.js';
 const LAYOUT_KEYS = [
     'show-clock', 'show-quick-settings', 'show-activities',
     'show-tray-indicators', 'idle-indicators', 'home-indicators',
-    // Windows not kept below the island: Quick Settings moves to its second page.
-    'reserve-space',
 ];
 
 export class PanelBridge {
@@ -113,7 +111,8 @@ export class PanelBridge {
             showTrayIndicators: this._settings.get_boolean('show-tray-indicators'),
             idleIndicators: this._settings.get_strv('idle-indicators'),
             homeIndicators: this._settings.get_strv('home-indicators'),
-            cornerInIsland: !this._settings.get_boolean('reserve-space'),
+            // Quick Settings always lives at the end of the island's second page.
+            cornerInIsland: true,
         });
 
         for (const [slot, roles] of Object.entries(split)) {
