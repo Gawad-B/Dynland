@@ -78,7 +78,7 @@ export default class DynlandPreferences extends ExtensionPreferences {
 
         page.add(group('Appearance', [
             style,
-            switchRow(settings, 'reserve-space', 'Keep windows below the island', 'Maximised windows start under the island instead of behind it'),
+            switchRow(settings, 'reserve-space', 'Keep windows below the island', 'Maximised windows start under the island. When off, the island hides while a window covers it, like Dash to Dock'),
         ]));
         return page;
     }

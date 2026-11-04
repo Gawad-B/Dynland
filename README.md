@@ -22,6 +22,8 @@ On Wayland, log out and back in so GNOME Shell loads the newly installed extensi
 - Over the expanded island, scroll (or click the page dots) to reach the second page:
   Vitals, Apps, every other indicator and, at the end, Quick Settings.
 - Hover or click the bubble to open the activity's card.
+- With "Keep windows below the island" off, the island hides while a window covers it
+  (like Dash to Dock's intellihide); push the pointer to the top edge to bring it back.
 - The island lives on the primary monitor only.
 - Panel items that have no status-area role (rare) are hidden while Dynland is enabled.
 

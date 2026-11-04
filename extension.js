@@ -9,6 +9,7 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
+import {AutoHide} from './autoHide.js';
 import {Bubble} from './bubble.js';
 import {Corner, Island} from './island.js';
 import {PanelBridge} from './panelBridge.js';
@@ -85,6 +86,9 @@ export default class DynlandExtension extends Extension {
         for (const actor of [this._corner, ...this._bubbles])
             Main.layoutManager.addChrome(actor, {affectsStruts: false, trackFullscreen: false});
         this._bridge.enable(name => name === 'corner' ? this._corner.slot() : this._island.slot(name));
+        this._autoHide = new AutoHide(this._settings, this._island, this._bubbles,
+            () => this._bridge.anyMenuOpen());
+        this._autoHide.enable();
 
         this._updateStrut();
         if (this._settings.get_boolean('debug-workspace-log'))
@@ -169,6 +173,8 @@ export default class DynlandExtension extends Extension {
         for (const activity of this._activities?.values() ?? [])
             this._safeDisable(activity);
         this._activities?.clear();
+        this._autoHide?.disable();
+        this._autoHide = null;
         this._manager?.clear();
 
         // Off the stage first: a relayout queued while indicators leave would
@@ -239,8 +245,11 @@ export default class DynlandExtension extends Extension {
                 bubble.setActivity(activity);
         }
         for (const activity of shown) {
-            if (!this._bubbles.some(b => b.activity?.id === activity.id))
+            if (!this._bubbles.some(b => b.activity?.id === activity.id)) {
                 free.shift().setActivity(activity);
+                // A new event shows an auto-hidden island for a moment.
+                this._autoHide?.showForActivity();
+            }
         }
         for (const bubble of free)
             bubble.setActivity(null);
