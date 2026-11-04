@@ -38,24 +38,15 @@ export function motionAllowed(settings) {
  */
 export function followFullscreen(actor, wanted) {
     const sync = () => {
-        actor.visible = wanted() && !inFullscreen();
+        const monitor = Main.layoutManager.primaryMonitor;
+        const fullscreen = global.window_group.visible && !!monitor?.inFullscreen;
+        actor.visible = wanted() && !fullscreen;
     };
-    onFullscreenChange(actor, sync);
-    return sync;
-}
-
-/** True while a fullscreen window covers the primary monitor (not in the overview). */
-export function inFullscreen() {
-    const monitor = Main.layoutManager.primaryMonitor;
-    return global.window_group.visible && !!monitor?.inFullscreen;
-}
-
-/** Calls `fn` whenever inFullscreen() may have changed, for as long as `actor` lives. */
-export function onFullscreenChange(actor, fn) {
     // Connected after LayoutManager's handlers, so inFullscreen is already up to date.
-    global.display.connectObject('in-fullscreen-changed', fn, actor);
-    Main.overview.connectObject('showing', fn, 'hidden', fn, actor);
-    Main.layoutManager.connectObject('monitors-changed', fn, actor);
+    global.display.connectObject('in-fullscreen-changed', sync, actor);
+    Main.overview.connectObject('showing', sync, 'hidden', sync, actor);
+    Main.layoutManager.connectObject('monitors-changed', sync, actor);
+    return sync;
 }
 
 /**
@@ -173,13 +164,9 @@ class MorphBox extends St.BoxLayout {
         for (const actor of this._containers())
             actor.remove_all_transitions();
 
-        if (key === this._shownKey || !this._fadeBetween(this._shownKey, key)) {
-            // Back to what is already on screen (rapid toggling), or a change
-            // the subclass wants unfaded: swap now, the moving edge reveals it.
-            // Pin the current size first: once the content changes, Clutter
-            // reports the new natural size as `width` and there is nothing to ease.
+        if (key === this._shownKey) {
+            // Back to what is already on screen (rapid toggling): no fades.
             this._pending = false;
-            this.set_size(this.width, this.height);
             this._resetContent();
             this._applyAndRecord();
             this._morph(true);
@@ -237,14 +224,6 @@ class MorphBox extends St.BoxLayout {
                 mode: Clutter.AnimationMode.EASE_OUT_QUAD,
             });
         }
-    }
-
-    /**
-     * Optional override: false to swap content at once between these states,
-     * letting the shape's moving edge reveal or hide it instead of fading.
-     */
-    _fadeBetween(_fromKey, _toKey) {
-        return true;
     }
 
     /**

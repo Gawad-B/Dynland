@@ -79,14 +79,14 @@ export default class DynlandExtension extends Extension {
 
         // On the stage before indicators move in, so they never lay out off-stage.
         // The bubbles go on top: an opened card can reach over the corner pill.
-        // All of them follow fullscreen on their own: GNOME's tracking would show
-        // hidden ones again, and the island stays as a mini pill over fullscreen.
-        for (const actor of [this._island, this._corner, ...this._bubbles])
+        // The corner and bubbles hide themselves, so they follow fullscreen on
+        // their own (GNOME's tracking would show them again).
+        Main.layoutManager.addChrome(this._island, {affectsStruts: false, trackFullscreen: true});
+        for (const actor of [this._corner, ...this._bubbles])
             Main.layoutManager.addChrome(actor, {affectsStruts: false, trackFullscreen: false});
         this._bridge.enable(name => name === 'corner' ? this._corner.slot() : this._island.slot(name));
 
         this._updateStrut();
-        this._keepWindowSnapshotsBelowChrome();
         if (this._settings.get_boolean('debug-workspace-log'))
             this._logWorkspaceSwitches();
         this._settings.connectObject('changed::reserve-space', () => this._updateStrut(), this);
@@ -150,44 +150,7 @@ export default class DynlandExtension extends Extension {
             'window-demands-attention', (_d, w) => console.log(`Dynland debug: demands attention: ${describe(w)}`),
             'window-marked-urgent', (_d, w) => console.log(`Dynland debug: urgent: ${describe(w)}`),
             'notify::focus-window', () => console.log(`Dynland debug: focus -> ${describe(global.display.focus_window)}`),
-            'in-fullscreen-changed', () => {
-                // The top windows say what made Mutter change its mind.
-                const top = global.get_window_actors().slice(-3).reverse().map(a => {
-                    const w = a.meta_window;
-                    return `${w.get_wm_class()} "${w.get_title()}" type ${w.get_window_type()}` +
-                        `${w.is_fullscreen() ? ' fullscreen' : ''}${w.is_override_redirect() ? ' override' : ''}`;
-                });
-                console.log(`Dynland debug: fullscreen changed: ${Main.layoutManager.primaryMonitor?.inFullscreen}; ` +
-                    `island mini ${this._island?._mini} visible ${this._island?.visible}; top: ${top.join(' | ')}`);
-            },
             this);
-        // A loop of these while fullscreen points at the pointer opening and closing the island.
-        this._island.connectObject(
-            'notify::hover', island => console.log(`Dynland debug: island hover ${island.hover}, expanded ${island.expanded}, mini ${island._mini}`),
-            this);
-    }
-
-    // GNOME animates a window's maximise, unmaximise, fullscreen and
-    // unfullscreen with a snapshot of its old frame, added on top of the whole
-    // UI (above the island and the dock) and faded out over 250 ms. With
-    // windows reaching under the island, that snapshot hid the island and
-    // faded it back in on every F11. Keep those snapshots just above the
-    // windows, below everything else.
-    _keepWindowSnapshotsBelowChrome() {
-        const resizing = Main.wm._resizing;
-        if (!(resizing instanceof Set))
-            return;
-        const debug = this._settings.get_boolean('debug-workspace-log');
-        Main.uiGroup.connectObject('child-added', (group, child) => {
-            for (const actor of resizing) {
-                if (actor.__animationInfo?.clone !== child)
-                    continue;
-                group.set_child_above_sibling(child, global.window_group);
-                if (debug)
-                    console.log(`Dynland debug: kept the size-change snapshot of "${actor.meta_window?.get_title()}" below the island`);
-                return;
-            }
-        }, this);
     }
 
     // Tolerates any partially initialised state (also called after a failed enable()).
@@ -197,7 +160,6 @@ export default class DynlandExtension extends Extension {
             this._keybound = false;
         }
         this._settings?.disconnectObject(this);
-        Main.uiGroup.disconnectObject(this);
         global.workspace_manager.disconnectObject(this);
         global.display.disconnectObject(this);
         global.stage.disconnectObject(this);

@@ -10,7 +10,7 @@ import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {MorphBox, TOP_MARGIN, followFullscreen, followStyle, inFullscreen, onFullscreenChange, scaleFactor} from './morphBox.js';
+import {MorphBox, TOP_MARGIN, followFullscreen, followStyle, scaleFactor} from './morphBox.js';
 
 const HOVER_EXPAND_MS = 120;
 const LEAVE_COLLAPSE_MS = 350;
@@ -35,8 +35,6 @@ class Island extends MorphBox {
         this._expanded = false;
         this._page = HOME;
         this._compact = false;
-        this._mini = false;
-        this._instant = false; // the next render skips motion
         this._hoverTimeoutId = 0;
         this._scrollCooldownId = 0;
         this._gestureTimeoutId = 0;
@@ -102,10 +100,6 @@ class Island extends MorphBox {
         this.add_action_full('dynland-toggle', Clutter.EventPhase.TARGET, this._clickGesture);
 
         this.connect('notify::hover', () => this._onHover());
-        // Over a fullscreen window: hidden while windows keep below the
-        // island, otherwise a small empty pill that opens on hover.
-        onFullscreenChange(this, () => this._syncFullscreen());
-        settings.connectObject('changed::reserve-space', () => this._syncFullscreen(), this);
         this.connect('captured-event', (_actor, event) => this._onCapturedEvent(event));
         this.connect('destroy', () => {
             this._clearHoverTimeout();
@@ -114,7 +108,6 @@ class Island extends MorphBox {
             if (this._gestureTimeoutId)
                 GLib.source_remove(this._gestureTimeoutId);
         });
-        this._syncFullscreen();
         this._render();
     }
 
@@ -299,42 +292,8 @@ class Island extends MorphBox {
         return this._expanded && this._page === MORE && this._hasMore();
     }
 
-    _syncFullscreen() {
-        const fullscreen = inFullscreen();
-        const reserve = this._settings.get_boolean('reserve-space');
-        this.visible = !fullscreen || !reserve;
-        const mini = fullscreen && !reserve;
-        if (mini === this._mini)
-            return;
-        this._mini = mini;
-        // Entering or leaving fullscreen snaps between the pill and the island:
-        // GNOME is already animating the window, and a fade-then-shrink here
-        // showed an empty pill for a frame each time.
-        this._instant = true;
-        try {
-            this.setExpanded(false);
-            this._render();
-        } finally {
-            this._instant = false;
-        }
-    }
-
-    // Closing into the empty pill snaps: a shrinking shape with its content
-    // already gone would be the empty pill again.
-    _motionAllowed() {
-        return !this._instant && this._stateKey() !== 'mini' && super._motionAllowed();
-    }
-
-    // The empty fullscreen pill opens like the iPhone island: the content is
-    // there at once and the growing shape uncovers it (no empty, growing pill).
-    _fadeBetween(fromKey, toKey) {
-        return fromKey !== 'mini' && toKey !== 'mini';
-    }
-
     _visibleIn(key) {
         switch (key) {
-        case 'mini':
-            return [];
         case 'more':
             return [this._moreRow, this._dots];
         case 'home':
@@ -346,15 +305,14 @@ class Island extends MorphBox {
 
     _stateKey() {
         if (!this._expanded)
-            return this._mini ? 'mini' : this._compact ? 'compact' : 'idle';
+            return this._compact ? 'compact' : 'idle';
         return this._onMorePage() ? 'more' : 'home';
     }
 
     _applyContent() {
         const more = this._onMorePage();
-        const mini = this._mini && !this._expanded;
         const filled = slot => slot.get_n_children() > 0;
-        this._homeRow.visible = !more && !mini;
+        this._homeRow.visible = !more;
         this._slots.left.visible = filled(this._slots.left);
         this._slots.center.visible = filled(this._slots.center);
         this._slots.idle.visible = filled(this._slots.idle) && (this._expanded || !this._compact);
@@ -365,7 +323,6 @@ class Island extends MorphBox {
             dot.checked = page === (more ? MORE : HOME);
         });
         this._setStyleClass('dynland-expanded', this._expanded);
-        this._setStyleClass('dynland-mini', mini);
     }
 
     _reposition() {
