@@ -18,6 +18,10 @@ const EDGE_PX = 2; // pointer this close to the top edge reveals it
 const EDGE_SLACK_PX = 40; // ...within the island's width plus this much on each side
 const LEAVE_HIDE_MS = 600; // after the pointer leaves a revealed island
 const ACTIVITY_SHOW_MS = 3000; // a new live activity shows the island this long
+// A window-driven hide or show waits until it has held this long, like Dash
+// to Dock's own delays, so a window flickering over the spot (an app
+// resizing, an animation passing by) cannot flash the island.
+const SETTLE_MS = 250;
 const SLIDE_OUT_MS = 250;
 const SLIDE_IN_MS = 200;
 
@@ -46,6 +50,7 @@ export class AutoHide {
         this._pollId = 0;
         this._leaveId = 0;
         this._activityId = 0;
+        this._settleId = 0;
         this._windows = new Set();
     }
 
@@ -55,7 +60,7 @@ export class AutoHide {
             'window-created', (_d, window) => this._trackWindow(window),
             'restacked', () => this._queueCheck(), this);
         global.workspace_manager.connectObject('active-workspace-changed', () => this._queueCheck(), this);
-        Main.overview.connectObject('showing', () => this._update(), 'hidden', () => this._update(), this);
+        Main.overview.connectObject('showing', () => this._update(true), 'hidden', () => this._update(true), this);
         this._island.connectObject(
             'notify::hover', () => this._onHover(),
             'notify::height', () => this._queueCheck(), this);
@@ -73,11 +78,11 @@ export class AutoHide {
         for (const window of this._windows)
             window.disconnectObject(this);
         this._windows.clear();
-        for (const id of [this._checkId, this._pollId, this._leaveId, this._activityId]) {
+        for (const id of [this._checkId, this._pollId, this._leaveId, this._activityId, this._settleId]) {
             if (id)
                 GLib.source_remove(id);
         }
-        this._checkId = this._pollId = this._leaveId = this._activityId = 0;
+        this._checkId = this._pollId = this._leaveId = this._activityId = this._settleId = 0;
         for (const actor of this._actors()) {
             actor.remove_transition('translation-y');
             actor.translation_y = 0;
@@ -95,7 +100,7 @@ export class AutoHide {
             this._update();
             return GLib.SOURCE_REMOVE;
         });
-        this._update();
+        this._update(true);
     }
 
     _actors() {
@@ -132,13 +137,17 @@ export class AutoHide {
     // The island's spot: its own rectangle, from the top of the monitor down
     // (positions ignore the slide, so this is where it shows).
     _overlapped() {
+        return this._overlapping().length > 0;
+    }
+
+    _overlapping() {
         const monitor = Main.layoutManager.primaryMonitor;
         if (!monitor)
-            return false;
+            return [];
         const island = this._island;
         const area = {x1: island.x, x2: island.x + island.width, y1: monitor.y, y2: island.y + island.height};
         const workspace = global.workspace_manager.get_active_workspace();
-        return [...this._windows].some(window => {
+        return [...this._windows].filter(window => {
             if (window.minimized || !OVERLAP_TYPES.includes(window.get_window_type()) ||
                 !window.located_on_workspace(workspace) || window.get_monitor() !== monitor.index)
                 return false;
@@ -155,13 +164,39 @@ export class AutoHide {
             this._overlapped();
     }
 
-    _update() {
+    // `now`: a reveal the user asked for (pointer at the edge, a new event,
+    // the overview) applies at once; window-driven changes settle first.
+    _update(now = false) {
         const hide = this._shouldHide();
-        if (hide !== this._hidden) {
-            this._hidden = hide;
-            this._slide(hide);
+        if (hide === this._hidden) {
+            if (this._settleId) {
+                GLib.source_remove(this._settleId);
+                this._settleId = 0;
+            }
+        } else if (now) {
+            this._apply(hide);
+        } else if (!this._settleId) {
+            this._settleId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, SETTLE_MS, () => {
+                this._settleId = 0;
+                const still = this._shouldHide();
+                if (still !== this._hidden)
+                    this._apply(still);
+                this._syncPointerPoll();
+                return GLib.SOURCE_REMOVE;
+            });
         }
         this._syncPointerPoll();
+    }
+
+    _apply(hide) {
+        this._hidden = hide;
+        if (this._settings.get_boolean('debug-workspace-log')) {
+            const windows = this._overlapping().map(w => `"${w.get_title()}"`).join(', ') || 'none';
+            console.log(`Dynland debug: island ${hide ? 'hides' : 'shows'}; overlapping: ${windows}; ` +
+                `pointer ${this._pointerReveal}, event ${this._activityReveal}, hover ${this._island.hover}, ` +
+                `overview ${Main.overview.visible}`);
+        }
+        this._slide(hide);
     }
 
     _slide(hide) {
@@ -189,7 +224,7 @@ export class AutoHide {
                 if (this._pointerInZone(true)) {
                     this._pollId = 0;
                     this._pointerReveal = true;
-                    this._update();
+                    this._update(true);
                     // The pointer may never reach the island; drop the reveal
                     // after a while unless it does.
                     this._startLeaveTimer();

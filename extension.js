@@ -150,6 +150,12 @@ export default class DynlandExtension extends Extension {
                 sum = [0, 0];
             return Clutter.EVENT_PROPAGATE;
         }, this);
+        // Dash to Dock hiding and showing, to line up with the island's own log lines.
+        const dock = Main.uiGroup.get_children().find(a => a.name === 'dashtodockContainer');
+        this._debugDock = dock ?? null;
+        dock?.connectObject(
+            'showing', () => console.log('Dynland debug: Dash to Dock shows'),
+            'hiding', () => console.log('Dynland debug: Dash to Dock hides'), this);
         global.display.connectObject(
             'window-demands-attention', (_d, w) => console.log(`Dynland debug: demands attention: ${describe(w)}`),
             'window-marked-urgent', (_d, w) => console.log(`Dynland debug: urgent: ${describe(w)}`),
@@ -167,6 +173,8 @@ export default class DynlandExtension extends Extension {
         global.workspace_manager.disconnectObject(this);
         global.display.disconnectObject(this);
         global.stage.disconnectObject(this);
+        this._debugDock?.disconnectObject(this);
+        this._debugDock = null;
         Main.layoutManager.disconnectObject(this);
         St.ThemeContext.get_for_stage(global.stage).disconnectObject(this);
 
