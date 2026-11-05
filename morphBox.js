@@ -192,10 +192,13 @@ class MorphBox extends St.BoxLayout {
         for (const actor of [...this._containers(), ...this._parts()])
             actor.remove_all_transitions();
 
-        if (key === this._shownKey) {
-            // Back to what is already on screen (rapid toggling): no fades.
+        if (key === this._shownKey || !this._fadeBetween(this._shownKey, key)) {
+            // Back to what is already on screen (rapid toggling), or a change
+            // the subclass wants swapped in one frame: no fades. Pin the size
+            // first, or the morph would read the new size as the old one.
             const carried = this._carryBefore();
             this._pending = false;
+            this.set_size(this.width, this.height);
             this._resetContent();
             this._applyAndRecord();
             this._carryAfter(carried);
@@ -274,6 +277,14 @@ class MorphBox extends St.BoxLayout {
                 mode: Clutter.AnimationMode.EASE_OUT_QUAD,
             });
         }
+    }
+
+    /**
+     * Optional override: false to swap the content between these two states
+     * in one frame instead of fading out and back in.
+     */
+    _fadeBetween(_fromKey, _toKey) {
+        return true;
     }
 
     /**

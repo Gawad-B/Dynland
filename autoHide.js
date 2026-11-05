@@ -56,7 +56,11 @@ export class AutoHide {
     }
 
     enable() {
-        this._settings.connectObject('changed::reserve-space', () => this._queueCheck(), this);
+        this._settings.connectObject('changed::reserve-space', () => {
+            this._syncUnredirect();
+            this._queueCheck();
+        }, this);
+        this._syncUnredirect();
         global.display.connectObject(
             'window-created', (_d, window) => this._trackWindow(window),
             'restacked', () => this._queueCheck(), this);
@@ -91,11 +95,14 @@ export class AutoHide {
         this._holdUnredirect(false);
     }
 
-    // With the island (and the dock) out of the way, a maximised window covers
-    // the whole screen and Mutter starts scanning it out directly; switching
-    // back to compositing when the island or the dock returns flashes both of
-    // them. GNOME's own OSD avoids the same thing this way: keep compositing
-    // for as long as the island is hidden.
+    // While auto-hide is in use (windows reach under the island), a maximised
+    // window can cover the whole screen, and Mutter may scan it out directly,
+    // skipping the island drawn over it. Keep compositing the whole time, as
+    // GNOME's own always-visible top bar effectively does.
+    _syncUnredirect() {
+        this._holdUnredirect(!this._settings.get_boolean('reserve-space'));
+    }
+
     _holdUnredirect(hold) {
         if (hold === this._unredirectHeld)
             return;
@@ -207,19 +214,14 @@ export class AutoHide {
 
     _apply(hide) {
         this._hidden = hide;
-        // Before the slide starts on the way out; after the island is back on the way in.
-        if (hide)
-            this._holdUnredirect(true);
+
         if (this._settings.get_boolean('debug-workspace-log')) {
             const windows = this._overlapping().map(w => `"${w.get_title()}"`).join(', ') || 'none';
             console.log(`Dynland debug: island ${hide ? 'hides' : 'shows'}; overlapping: ${windows}; ` +
                 `pointer ${this._pointerReveal}, event ${this._activityReveal}, hover ${this._island.hover}, ` +
                 `overview ${Main.overview.visible}`);
         }
-        this._slide(hide, () => {
-            if (!this._hidden)
-                this._holdUnredirect(false);
-        });
+        this._slide(hide, () => {});
     }
 
     // `done` runs once the island has finished moving (or at once without motion).

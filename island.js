@@ -314,6 +314,16 @@ class Island extends MorphBox {
     // the row its full width anyway (centred, clipped by the island) instead
     // of letting the box squeeze it and ellipsize its labels.
     vfunc_allocate(box) {
+        // Centre on the primary monitor here, as part of the layout, rather
+        // than moving the island from a width handler mid-layout: that left it
+        // without valid stage views for a frame, and Mutter could then scan a
+        // maximised window out directly over it (invisible but still clickable).
+        const monitor = Main.layoutManager.primaryMonitor;
+        if (monitor) {
+            const width = box.get_width();
+            const x = Math.floor(monitor.x + (monitor.width - width) / 2);
+            box = Clutter.ActorBox.new(x, box.y1, x + width, box.y2);
+        }
         super.vfunc_allocate(box);
         for (const row of [this._homeRow, this._moreRow]) {
             if (!row.visible)
@@ -325,6 +335,13 @@ class Island extends MorphBox {
             const x1 = Math.floor((current.x1 + current.x2 - natural) / 2);
             row.allocate(Clutter.ActorBox.new(x1, current.y1, x1 + natural, current.y2));
         }
+    }
+
+    // Flipping pages swaps the row in one frame: fading the old page out
+    // first left the pill empty (but still clickable) for ~120 ms.
+    _fadeBetween(fromKey, toKey) {
+        const pages = ['home', 'more'];
+        return !(pages.includes(fromKey) && pages.includes(toKey));
     }
 
     _visibleIn(key) {
@@ -360,13 +377,17 @@ class Island extends MorphBox {
         this._setStyleClass('dynland-expanded', this._expanded);
     }
 
+    // Only the top edge is set here (x is centred in vfunc_allocate), and only
+    // when it changes, so width changes never move the island mid-layout.
     _reposition() {
         const monitor = Main.layoutManager.primaryMonitor;
         if (!monitor || !this.get_stage())
             return;
-        this.set_position(
-            Math.floor(monitor.x + (monitor.width - this.width) / 2),
-            monitor.y + TOP_MARGIN * scaleFactor());
+        const y = monitor.y + TOP_MARGIN * scaleFactor();
+        if (this._fixedY !== y) {
+            this._fixedY = y;
+            this.set_position(monitor.x, y);
+        }
     }
 });
 
