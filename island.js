@@ -398,6 +398,16 @@ class Island extends MorphBox {
 
     // Only the top edge is set here (x is centred in vfunc_allocate), and only
     // when it changes, so width changes never move the island mid-layout.
+    // Where the island's left edge is drawn. Its `x` reads as 0 while a
+    // relayout is pending (the fixed position; it centres itself in
+    // vfunc_allocate), so answer from the allocation or the same centring.
+    get drawnX() {
+        if (this.has_allocation())
+            return this.get_allocation_box().x1;
+        const monitor = Main.layoutManager.primaryMonitor;
+        return monitor ? Math.floor(monitor.x + (monitor.width - this.width) / 2) : this.x;
+    }
+
     _reposition() {
         const monitor = Main.layoutManager.primaryMonitor;
         if (!monitor || !this.get_stage())
@@ -438,6 +448,16 @@ class Corner extends St.BoxLayout {
     _sync() {
         this._syncVisible();
         this._reposition();
+    }
+
+    // Where the island's left edge is drawn. Its `x` reads as 0 while a
+    // relayout is pending (the fixed position; it centres itself in
+    // vfunc_allocate), so answer from the allocation or the same centring.
+    get drawnX() {
+        if (this.has_allocation())
+            return this.get_allocation_box().x1;
+        const monitor = Main.layoutManager.primaryMonitor;
+        return monitor ? Math.floor(monitor.x + (monitor.width - this.width) / 2) : this.x;
     }
 
     _reposition() {

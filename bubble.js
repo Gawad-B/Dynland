@@ -300,8 +300,9 @@ export const Bubble = GObject.registerClass({
             return;
         const previous = this._previous;
         const anchor = previous?.visible ? previous : island;
-        // Where the anchor is heading, not where it is mid-slide.
-        const anchorX = anchor._slideTo ?? anchor.x;
+        // Where the anchor is heading, not where it is mid-slide; the island's
+        // `x` is 0 while it awaits allocation, so ask where it is drawn.
+        const anchorX = anchor._slideTo ?? (anchor === island ? island.drawnX : anchor.x);
         const x = Math.floor(anchorX + anchor.width + GAP * scaleFactor());
         const slide = this._anchor && anchor !== this._anchor && this.visible && this._motionAllowed();
         this._anchor = anchor;
