@@ -12,6 +12,11 @@ import St from 'gi://St';
 import {MorphBox, followFullscreen, scaleFactor} from './morphBox.js';
 
 const GAP = 8; // logical px between the island and the bubble
+// The island's empty pill (stylesheet .dynland-bare) is 80x24 with no padding;
+// the bubble keeps its 2px vertical padding, so its row is 20 high.
+const BARE_WIDTH = 80;
+const BARE_HEIGHT = 24;
+const BARE_PADDING = 2;
 const POP_IN_MS = 220;
 const POP_OUT_MS = 140;
 const POP_SCALE = 0.4;
@@ -45,6 +50,7 @@ export const Bubble = GObject.registerClass({
         this._activityExpanded = false;
         this._poppingOut = false;
         this._wanted = false; // shown, unless a fullscreen window hides it
+        this._bare = false;
         this._syncVisible = followFullscreen(this, () => this._wanted);
         this._errorSources = new Set();
 
@@ -75,7 +81,8 @@ export const Bubble = GObject.registerClass({
                 'notify::y', () => this._queueFollow(),
                 'notify::width', () => this._queueFollow(),
                 'notify::height', () => this._queueFollow(),
-                'notify::visible', () => this._queueFollow(), this);
+                'notify::visible', () => this._queueFollow(),
+                'notify::style-class', () => this._syncBare(), this);
         }
         this.connect('notify::hover', () => this._setActivityExpanded(this.hover));
         this.connect('destroy', () => {
@@ -194,7 +201,7 @@ export const Bubble = GObject.registerClass({
 
     _naturalSize() {
         const [width, height] = super._naturalSize();
-        return [width, this._withIslandHeight([0, height])[1]];
+        return [this._withBareWidth([0, width])[1], this._withIslandHeight([0, height])[1]];
     }
 
     _withIslandHeight([min, nat]) {
@@ -230,6 +237,32 @@ export const Bubble = GObject.registerClass({
         this._compactBin.visible = !expanded;
         this._expandedBin.visible = expanded;
         this._setStyleClass('dynland-activity-expanded', expanded);
+        this._syncBare();
+    }
+
+    // Beside the island's small empty pill (auto-hide off, closed), a compact
+    // bubble takes the pill's size so the pair reads as one symmetric unit.
+    // Set as geometry rather than a style class: a style change on the bubble
+    // while the island morphs left it without an allocation for a frame.
+    _syncBare() {
+        const bare = this._island.has_style_class_name('dynland-bare') && !this._activityExpanded;
+        if (bare === this._bare)
+            return;
+        this._bare = bare;
+        // The compact row otherwise keeps GNOME's panel height; the width is
+        // clamped in the size requests below, which the morph reads.
+        this._compactBin.height = bare ? (BARE_HEIGHT - 2 * BARE_PADDING) * scaleFactor() : -1;
+    }
+
+    vfunc_get_preferred_width(forHeight) {
+        return this._withBareWidth(super.vfunc_get_preferred_width(forHeight));
+    }
+
+    _withBareWidth([min, nat]) {
+        if (!this._bare)
+            return [min, nat];
+        const width = BARE_WIDTH * scaleFactor();
+        return [Math.max(min, width), Math.max(nat, width)];
     }
 
     // The error handler may release the activity and re-enter setActivity, so
@@ -241,6 +274,11 @@ export const Bubble = GObject.registerClass({
             return GLib.SOURCE_REMOVE;
         });
         this._errorSources.add(sourceId);
+    }
+
+    // Its own width changes mid-layout as well (the bare size, a morph).
+    _onWidthChanged() {
+        this._queueFollow();
     }
 
     // Moves beside the island, and (compact) takes its height, before the next frame.

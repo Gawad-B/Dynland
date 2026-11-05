@@ -92,7 +92,7 @@ class MorphBox extends St.BoxLayout {
         this._radius = null;
         this._radiusLaterId = 0;
 
-        this.connect('notify::width', () => this._reposition());
+        this.connect('notify::width', () => this._onWidthChanged());
         // Height changes arrive mid-layout; restyling there would force a
         // second layout in the same frame, so round the corners just before the next one.
         this.connect('notify::height', () => this._queueRadius());
@@ -337,6 +337,13 @@ class MorphBox extends St.BoxLayout {
     }
 
     // Natural size without touching an explicit size or a running morph.
+    // The width changes mid-layout too. A subclass whose position depends on
+    // other actors must defer (see Bubble); moving itself right there leaves
+    // it without an allocation for the frame.
+    _onWidthChanged() {
+        this._reposition();
+    }
+
     _naturalSize() {
         const [, width] = super.vfunc_get_preferred_width(-1);
         const [, height] = super.vfunc_get_preferred_height(width);
