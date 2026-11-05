@@ -16,13 +16,13 @@ const CHECK_DELAY_MS = 100; // windows moving or resizing: re-check at most this
 const POINTER_POLL_MS = 100; // while hidden: how often to look for the pointer at the top edge
 const EDGE_PX = 2; // pointer this close to the top edge reveals it
 const EDGE_SLACK_PX = 40; // ...within the island's width plus this much on each side
-const LEAVE_HIDE_MS = 600; // after the pointer leaves a revealed island
+const LEAVE_HIDE_MS = 2000; // after the pointer leaves a revealed island
 const ACTIVITY_SHOW_MS = 3000; // a new live activity shows the island this long
 // A window-driven hide or show waits until it has held this long, like Dash
 // to Dock's own delays, so a window flickering over the spot (an app
 // resizing, an animation passing by) cannot flash the island.
 const SETTLE_MS = 250;
-const SLIDE_OUT_MS = 250;
+const SLIDE_OUT_MS = 400;
 const SLIDE_IN_MS = 200;
 
 const OVERLAP_TYPES = [
