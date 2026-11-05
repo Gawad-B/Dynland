@@ -3,6 +3,16 @@
 // current workspace overlaps it, the island and its bubbles slide up off the
 // screen. Pushing the pointer against the top edge above it, a new live
 // activity, or the window moving away brings it back.
+//
+// It also keeps the compositor drawing while the island is over a window.
+// Mutter puts the top window straight onto the display ("direct scanout";
+// find_candidate() in its meta-compositor-view-native.c) whenever that
+// window covers the monitor exactly, nothing animates it and nobody holds
+// disable_unredirect(). A maximised window with no strut qualifies, and
+// Mutter never looks at what the shell draws above it: the island, the dock
+// and every menu then stay clickable but invisible. GNOME's menus
+// (boxpointer.js) and Dash to Dock (when shown over a fullscreen window)
+// hold the inhibit while they are on screen, and so does the island.
 
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
@@ -25,6 +35,7 @@ const SETTLE_MS = 250;
 const SLIDE_OUT_MS = 400;
 const SLIDE_IN_MS = 200;
 
+// Windows that make the island hide.
 const OVERLAP_TYPES = [
     Meta.WindowType.NORMAL,
     Meta.WindowType.DIALOG,
@@ -44,6 +55,7 @@ export class AutoHide {
         this._bubbles = bubbles;
         this._anyMenuOpen = anyMenuOpen;
         this._hidden = false;
+        this._offscreen = false; // slid all the way off the screen
         this._pointerReveal = false;
         this._activityReveal = false;
         this._checkId = 0;
@@ -56,11 +68,7 @@ export class AutoHide {
     }
 
     enable() {
-        this._settings.connectObject('changed::reserve-space', () => {
-            this._syncUnredirect();
-            this._queueCheck();
-        }, this);
-        this._syncUnredirect();
+        this._settings.connectObject('changed::reserve-space', () => this._queueCheck(), this);
         global.display.connectObject(
             'window-created', (_d, window) => this._trackWindow(window),
             'restacked', () => this._queueCheck(), this);
@@ -69,9 +77,13 @@ export class AutoHide {
         this._island.connectObject(
             'notify::hover', () => this._onHover(),
             'notify::height', () => this._queueCheck(), this);
+        // GNOME unmaps them for a fullscreen window; nothing to hold for then.
+        for (const actor of this._actors())
+            actor.connectObject('notify::mapped', () => this._syncHold(), this);
         for (const window of global.display.list_all_windows())
             this._trackWindow(window);
         this._update();
+        this._syncHold();
     }
 
     disable() {
@@ -79,7 +91,8 @@ export class AutoHide {
         global.display.disconnectObject(this);
         global.workspace_manager.disconnectObject(this);
         Main.overview.disconnectObject(this);
-        this._island.disconnectObject(this);
+        for (const actor of this._actors())
+            actor.disconnectObject(this);
         for (const window of this._windows)
             window.disconnectObject(this);
         this._windows.clear();
@@ -92,15 +105,23 @@ export class AutoHide {
             actor.remove_transition('translation-y');
             actor.translation_y = 0;
         }
+        this._offscreen = false;
         this._holdUnredirect(false);
     }
 
-    // While auto-hide is in use (windows reach under the island), a maximised
-    // window can cover the whole screen, and Mutter may scan it out directly,
-    // skipping the island drawn over it. Keep compositing the whole time, as
-    // GNOME's own always-visible top bar effectively does.
-    _syncUnredirect() {
-        this._holdUnredirect(!this._settings.get_boolean('reserve-space'));
+    // Hold the inhibit exactly while the island or a bubble is on screen
+    // with a window underneath. Mutter only counts holds, and an extension
+    // that releases a hold it never took (search-light does at startup)
+    // cancels whichever one is in effect; a hold kept from startup could be
+    // gone by the time a window is maximised. Taken when the window arrives
+    // under the island, before the next frame, and again at every reveal,
+    // the hold is fresh whenever it matters.
+    _syncHold() {
+        this._holdUnredirect(this._onScreen() && this._overlapping(true).length > 0);
+    }
+
+    _onScreen() {
+        return !this._offscreen && this._actors().some(actor => actor.mapped);
     }
 
     _holdUnredirect(hold) {
@@ -149,6 +170,9 @@ export class AutoHide {
     }
 
     _queueCheck() {
+        // A window reaching the island's spot must stop direct scanout
+        // before the next frame, so the hold is never deferred.
+        this._syncHold();
         if (this._checkId)
             return;
         this._checkId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, CHECK_DELAY_MS, () => {
@@ -158,26 +182,39 @@ export class AutoHide {
         });
     }
 
-    // The island's spot: its own rectangle, from the top of the monitor down
-    // (positions ignore the slide, so this is where it shows).
     _overlapped() {
         return this._overlapping().length > 0;
     }
 
-    _overlapping() {
+    // Windows under the island's spot: its own rectangle, from the top of the
+    // monitor down (positions ignore the slide, so this is where it shows).
+    // Normal windows and dialogs make it hide; for the compositing hold every
+    // kind counts (`anyType`), since any of them can cover the monitor.
+    _overlapping(anyType = false) {
         const monitor = Main.layoutManager.primaryMonitor;
         if (!monitor)
             return [];
-        const island = this._island;
-        const area = {x1: island.x, x2: island.x + island.width, y1: monitor.y, y2: island.y + island.height};
+        const spot = this._spot();
+        const area = {x1: spot.x, x2: spot.x + spot.width, y1: monitor.y, y2: spot.y + spot.height};
         const workspace = global.workspace_manager.get_active_workspace();
         return [...this._windows].filter(window => {
-            if (window.minimized || !OVERLAP_TYPES.includes(window.get_window_type()) ||
+            if (window.minimized || (!anyType && !OVERLAP_TYPES.includes(window.get_window_type())) ||
                 !window.located_on_workspace(workspace) || window.get_monitor() !== monitor.index)
                 return false;
             const r = window.get_frame_rect();
             return r.x < area.x2 && r.x + r.width > area.x1 && r.y < area.y2 && r.y + r.height > area.y1;
         });
+    }
+
+    // Where the island shows: its allocation (it centres itself during
+    // layout, so its `x` reads as 0 while a relayout is pending), ignoring
+    // the slide. Before the first layout, its size and fixed position.
+    _spot() {
+        const island = this._island;
+        const box = island.get_allocation_box();
+        if (box.x2 > box.x1)
+            return {x: box.x1, y: box.y1, width: box.x2 - box.x1, height: box.y2 - box.y1};
+        return {x: island.x, y: island.y, width: island.width, height: island.height};
     }
 
     _shouldHide() {
@@ -214,19 +251,32 @@ export class AutoHide {
 
     _apply(hide) {
         this._hidden = hide;
+        if (!hide) {
+            // Held before the first frame that shows it.
+            this._offscreen = false;
+            this._syncHold();
+        }
 
         if (this._settings.get_boolean('debug-workspace-log')) {
             const windows = this._overlapping().map(w => `"${w.get_title()}"`).join(', ') || 'none';
             console.log(`Dynland debug: island ${hide ? 'hides' : 'shows'}; overlapping: ${windows}; ` +
                 `pointer ${this._pointerReveal}, event ${this._activityReveal}, hover ${this._island.hover}, ` +
-                `overview ${Main.overview.visible}`);
+                `overview ${Main.overview.visible}, compositing held ${this._unredirectHeld}`);
         }
-        this._slide(hide, () => {});
+        this._slide(hide, () => {
+            // Only a slide-out that ran to the end gets here (an interrupted
+            // one never completes); released once nothing is left to draw.
+            if (this._hidden) {
+                this._offscreen = true;
+                this._syncHold();
+            }
+        });
     }
 
     // `done` runs once the island has finished moving (or at once without motion).
     _slide(hide, done) {
-        const offset = hide ? -(this._island.y + this._island.height + 4 * scaleFactor()) : 0;
+        const spot = this._spot();
+        const offset = hide ? -(spot.y + spot.height + 4 * scaleFactor()) : 0;
         const animate = motionAllowed(this._settings);
         for (const actor of this._actors()) {
             actor.remove_transition('translation-y');
@@ -276,10 +326,10 @@ export class AutoHide {
         if (!monitor)
             return false;
         const [x, y] = global.get_pointer();
-        const island = this._island;
+        const spot = this._spot();
         const slack = EDGE_SLACK_PX * scaleFactor();
-        const bottom = edgeOnly ? monitor.y + EDGE_PX * scaleFactor() : island.y + island.height;
-        return y <= bottom && x >= island.x - slack && x <= island.x + island.width + slack;
+        const bottom = edgeOnly ? monitor.y + EDGE_PX * scaleFactor() : spot.y + spot.height;
+        return y <= bottom && x >= spot.x - slack && x <= spot.x + spot.width + slack;
     }
 
     _onHover() {
