@@ -51,6 +51,7 @@ export class AutoHide {
         this._leaveId = 0;
         this._activityId = 0;
         this._settleId = 0;
+        this._unredirectHeld = false;
         this._windows = new Set();
     }
 
@@ -87,6 +88,22 @@ export class AutoHide {
             actor.remove_transition('translation-y');
             actor.translation_y = 0;
         }
+        this._holdUnredirect(false);
+    }
+
+    // With the island (and the dock) out of the way, a maximised window covers
+    // the whole screen and Mutter starts scanning it out directly; switching
+    // back to compositing when the island or the dock returns flashes both of
+    // them. GNOME's own OSD avoids the same thing this way: keep compositing
+    // for as long as the island is hidden.
+    _holdUnredirect(hold) {
+        if (hold === this._unredirectHeld)
+            return;
+        this._unredirectHeld = hold;
+        if (hold)
+            global.compositor.disable_unredirect();
+        else
+            global.compositor.enable_unredirect();
     }
 
     /** A new live activity started: show the island for a moment. */
@@ -190,16 +207,23 @@ export class AutoHide {
 
     _apply(hide) {
         this._hidden = hide;
+        // Before the slide starts on the way out; after the island is back on the way in.
+        if (hide)
+            this._holdUnredirect(true);
         if (this._settings.get_boolean('debug-workspace-log')) {
             const windows = this._overlapping().map(w => `"${w.get_title()}"`).join(', ') || 'none';
             console.log(`Dynland debug: island ${hide ? 'hides' : 'shows'}; overlapping: ${windows}; ` +
                 `pointer ${this._pointerReveal}, event ${this._activityReveal}, hover ${this._island.hover}, ` +
                 `overview ${Main.overview.visible}`);
         }
-        this._slide(hide);
+        this._slide(hide, () => {
+            if (!this._hidden)
+                this._holdUnredirect(false);
+        });
     }
 
-    _slide(hide) {
+    // `done` runs once the island has finished moving (or at once without motion).
+    _slide(hide, done) {
         const offset = hide ? -(this._island.y + this._island.height + 4 * scaleFactor()) : 0;
         const animate = motionAllowed(this._settings);
         for (const actor of this._actors()) {
@@ -212,8 +236,11 @@ export class AutoHide {
                 translation_y: offset,
                 duration: hide ? SLIDE_OUT_MS : SLIDE_IN_MS,
                 mode: Clutter.AnimationMode.EASE_OUT_CUBIC,
+                onComplete: actor === this._island ? done : undefined,
             });
         }
+        if (!animate)
+            done();
     }
 
     // Only while hidden: watch for the pointer pushed against the top edge
