@@ -1,8 +1,8 @@
 // Auto-hide for the island, like Dash to Dock's intellihide: while windows
-// are not kept below the island (reserve-space off) and a window on the
-// current workspace overlaps it, the island and its bubbles slide up off the
-// screen. Pushing the pointer against the top edge above it, a new live
-// activity, or the window moving away brings it back.
+// are not kept below the island (reserve-space off), auto-hide is on and a
+// window on the current workspace overlaps it, the island and its bubbles
+// slide up off the screen. Pushing the pointer against the top edge above
+// it, a new live activity, or the window moving away brings it back.
 //
 // It also keeps the compositor drawing while the island is over a window.
 // Mutter puts the top window straight onto the display ("direct scanout";
@@ -12,7 +12,10 @@
 // Mutter never looks at what the shell draws above it: the island, the dock
 // and every menu then stay clickable but invisible. GNOME's menus
 // (boxpointer.js) and Dash to Dock (when shown over a fullscreen window)
-// hold the inhibit while they are on screen, and so does the island.
+// hold the inhibit while they are on screen, and so does the island. Dash
+// to Dock relies on GNOME's panel strut for maximised windows, which Dynland
+// removes, so the island holds the inhibit for the dock too while it is
+// shown over a window.
 
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
@@ -42,6 +45,10 @@ const OVERLAP_TYPES = [
     Meta.WindowType.MODAL_DIALOG,
 ];
 
+// Dash to Dock's dock container and its dock-state values.
+const DOCK_NAME = 'dashtodockContainer';
+const DOCK_HIDDEN = 0;
+
 export class AutoHide {
     /**
      * @param {Gio.Settings} settings Dynland settings
@@ -65,10 +72,13 @@ export class AutoHide {
         this._settleId = 0;
         this._unredirectHeld = false;
         this._windows = new Set();
+        this._docks = new Set();
     }
 
     enable() {
-        this._settings.connectObject('changed::reserve-space', () => this._queueCheck(), this);
+        this._settings.connectObject(
+            'changed::reserve-space', () => this._queueCheck(),
+            'changed::auto-hide', () => this._queueCheck(), this);
         global.display.connectObject(
             'window-created', (_d, window) => this._trackWindow(window),
             'restacked', () => this._queueCheck(), this);
@@ -80,6 +90,11 @@ export class AutoHide {
         // GNOME unmaps them for a fullscreen window; nothing to hold for then.
         for (const actor of this._actors())
             actor.connectObject('notify::mapped', () => this._syncHold(), this);
+        Main.uiGroup.connectObject(
+            'child-added', (_g, child) => this._trackDock(child),
+            'child-removed', (_g, child) => this._untrackDock(child), this);
+        for (const child of Main.uiGroup.get_children())
+            this._trackDock(child);
         for (const window of global.display.list_all_windows())
             this._trackWindow(window);
         this._update();
@@ -93,6 +108,10 @@ export class AutoHide {
         Main.overview.disconnectObject(this);
         for (const actor of this._actors())
             actor.disconnectObject(this);
+        Main.uiGroup.disconnectObject(this);
+        for (const dock of this._docks)
+            dock.disconnectObject(this);
+        this._docks.clear();
         for (const window of this._windows)
             window.disconnectObject(this);
         this._windows.clear();
@@ -117,11 +136,48 @@ export class AutoHide {
     // under the island, before the next frame, and again at every reveal,
     // the hold is fresh whenever it matters.
     _syncHold() {
-        this._holdUnredirect(this._onScreen() && this._overlapping(true).length > 0);
+        const island = this._onScreen() && this._overlapping(true).length > 0;
+        const dock = [...this._docks].some(d => this._dockOnScreen(d) && this._windowsUnder(this._dockArea(d), true).length > 0);
+        this._holdUnredirect(island || dock);
     }
 
     _onScreen() {
         return !this._offscreen && this._actors().some(actor => actor.mapped);
+    }
+
+    // Dash to Dock: hold while its dock is shown (or sliding) over a window.
+    _trackDock(actor) {
+        if (actor.name !== DOCK_NAME || this._docks.has(actor))
+            return;
+        this._docks.add(actor);
+        actor.connectObject(
+            'notify::dock-state', () => this._syncHold(),
+            'notify::mapped', () => this._syncHold(),
+            'destroy', () => this._untrackDock(actor), this);
+        this._syncHold();
+    }
+
+    _untrackDock(actor) {
+        if (!this._docks.delete(actor))
+            return;
+        actor.disconnectObject(this);
+        this._syncHold();
+    }
+
+    _dockOnScreen(dock) {
+        return dock.mapped && dock.dockState !== DOCK_HIDDEN;
+    }
+
+    // Where the dock is drawn: its container sits just outside the monitor and
+    // the dash slides into view inside it, so measure the dash itself.
+    _dockArea(dock) {
+        const rect = (dock.dash ?? dock).get_transformed_extents();
+        const monitor = Main.layoutManager.findMonitorForActor(dock) ?? Main.layoutManager.primaryMonitor;
+        return {
+            x1: rect.origin.x, y1: rect.origin.y,
+            x2: rect.origin.x + rect.size.width, y2: rect.origin.y + rect.size.height,
+            monitor,
+        };
     }
 
     _holdUnredirect(hold) {
@@ -195,11 +251,17 @@ export class AutoHide {
         if (!monitor)
             return [];
         const spot = this._spot();
-        const area = {x1: spot.x, x2: spot.x + spot.width, y1: monitor.y, y2: spot.y + spot.height};
+        return this._windowsUnder({x1: spot.x, x2: spot.x + spot.width, y1: monitor.y, y2: spot.y + spot.height, monitor}, anyType);
+    }
+
+    // Windows on the current workspace and `area.monitor` that reach into `area`.
+    _windowsUnder(area, anyType) {
+        if (!area.monitor)
+            return [];
         const workspace = global.workspace_manager.get_active_workspace();
         return [...this._windows].filter(window => {
             if (window.minimized || (!anyType && !OVERLAP_TYPES.includes(window.get_window_type())) ||
-                !window.located_on_workspace(workspace) || window.get_monitor() !== monitor.index)
+                !window.located_on_workspace(workspace) || window.get_monitor() !== area.monitor.index)
                 return false;
             const r = window.get_frame_rect();
             return r.x < area.x2 && r.x + r.width > area.x1 && r.y < area.y2 && r.y + r.height > area.y1;
@@ -219,6 +281,7 @@ export class AutoHide {
 
     _shouldHide() {
         return !this._settings.get_boolean('reserve-space') &&
+            this._settings.get_boolean('auto-hide') &&
             !Main.overview.visible &&
             !this._island.hover && !this._island.expanded && !this._anyMenuOpen() &&
             !this._pointerReveal && !this._activityReveal &&

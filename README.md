@@ -24,9 +24,11 @@ On Wayland, log out and back in so GNOME Shell loads the newly installed extensi
 - Hover or click the bubble to open the activity's card.
 - With "Keep windows below the island" off, the island hides while a window covers it
   (like Dash to Dock's intellihide); push the pointer to the top edge to bring it back.
-  While it is shown over a window, Dynland keeps the compositor drawing (as GNOME's menus
-  and Dash to Dock do), since Mutter would otherwise put a window that fills the monitor
-  straight onto the display and leave the island, the dock and menus invisible.
+  Turn "Hide while a window covers the island" off instead to keep it on screen as an
+  empty black pill that opens on hover. Either way, while the island or Dash to Dock's
+  dock is shown over a window, Dynland keeps the compositor drawing (as GNOME's menus
+  do), since Mutter would otherwise put a window that fills the monitor straight onto the
+  display and leave the island, the dock and menus invisible.
 - The island lives on the primary monitor only.
 - Panel items that have no status-area role (rare) are hidden while Dynland is enabled.
 

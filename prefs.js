@@ -76,9 +76,14 @@ export default class DynlandPreferences extends ExtensionPreferences {
         });
         style.connect('notify::selected', () => settings.set_string('style', STYLES[style.selected]));
 
+        const autoHide = switchRow(settings, 'auto-hide', 'Hide while a window covers the island',
+            'Like Dash to Dock: push the pointer to the top edge to bring it back. When off, the island stays as an empty black pill that opens on hover');
+        settings.bind('reserve-space', autoHide, 'sensitive',
+            Gio.SettingsBindFlags.GET | Gio.SettingsBindFlags.INVERT_BOOLEAN);
         page.add(group('Appearance', [
             style,
-            switchRow(settings, 'reserve-space', 'Keep windows below the island', 'Maximised windows start under the island. When off, the island hides while a window covers it, like Dash to Dock'),
+            switchRow(settings, 'reserve-space', 'Keep windows below the island', 'Maximised windows start under the island. When off, windows reach under it and the option below applies'),
+            autoHide,
         ]));
         return page;
     }

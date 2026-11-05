@@ -35,6 +35,7 @@ class Island extends MorphBox {
         this._expanded = false;
         this._page = HOME;
         this._compact = false;
+        this._bare = false; // closed: an empty pill that opens on hover
         this._hoverTimeoutId = 0;
         this._scrollCooldownId = 0;
         this._gestureTimeoutId = 0;
@@ -136,6 +137,14 @@ class Island extends MorphBox {
      * Compact: the idle pill shrinks to just the clock, making room while
      * two activity bubbles sit beside it.
      */
+    /** Closed, show nothing: an empty black pill (iPhone-like) that opens on hover. */
+    setBare(bare) {
+        if (this._bare === bare)
+            return;
+        this._bare = bare;
+        this._render();
+    }
+
     setCompact(compact) {
         if (this._compact === compact)
             return;
@@ -299,6 +308,8 @@ class Island extends MorphBox {
     }
 
     _partsVisibleIn(key) {
+        if (key === 'bare')
+            return [];
         return this._parts().filter(slot => {
             if (slot.get_n_children() === 0)
                 return false;
@@ -338,14 +349,20 @@ class Island extends MorphBox {
     }
 
     // Flipping pages swaps the row in one frame: fading the old page out
-    // first left the pill empty (but still clickable) for ~120 ms.
+    // first left the pill empty (but still clickable) for ~120 ms. The empty
+    // pill opens like the iPhone island: the content is there at once and the
+    // growing shape uncovers it; closing, the shrinking shape covers it.
     _fadeBetween(fromKey, toKey) {
         const pages = ['home', 'more'];
+        if (fromKey === 'bare' || toKey === 'bare')
+            return false;
         return !(pages.includes(fromKey) && pages.includes(toKey));
     }
 
     _visibleIn(key) {
         switch (key) {
+        case 'bare':
+            return [];
         case 'more':
             return [this._moreRow, this._dots];
         case 'home':
@@ -357,14 +374,15 @@ class Island extends MorphBox {
 
     _stateKey() {
         if (!this._expanded)
-            return this._compact ? 'compact' : 'idle';
+            return this._bare ? 'bare' : this._compact ? 'compact' : 'idle';
         return this._onMorePage() ? 'more' : 'home';
     }
 
     _applyContent() {
         const more = this._onMorePage();
+        const bare = this._bare && !this._expanded;
         const filled = slot => slot.get_n_children() > 0;
-        this._homeRow.visible = !more;
+        this._homeRow.visible = !more && !bare;
         this._slots.left.visible = filled(this._slots.left);
         this._slots.center.visible = filled(this._slots.center);
         this._slots.idle.visible = filled(this._slots.idle) && (this._expanded || !this._compact);
@@ -375,6 +393,7 @@ class Island extends MorphBox {
             dot.checked = page === (more ? MORE : HOME);
         });
         this._setStyleClass('dynland-expanded', this._expanded);
+        this._setStyleClass('dynland-bare', bare);
     }
 
     // Only the top edge is set here (x is centred in vfunc_allocate), and only

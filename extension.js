@@ -91,9 +91,15 @@ export default class DynlandExtension extends Extension {
         this._autoHide.enable();
 
         this._updateStrut();
+        this._syncBare();
         if (this._settings.get_boolean('debug-workspace-log'))
             this._logWorkspaceSwitches();
-        this._settings.connectObject('changed::reserve-space', () => this._updateStrut(), this);
+        this._settings.connectObject(
+            'changed::reserve-space', () => {
+                this._updateStrut();
+                this._syncBare();
+            },
+            'changed::auto-hide', () => this._syncBare(), this);
         Main.layoutManager.connectObject('monitors-changed', () => this._updateStrut(), this);
         St.ThemeContext.get_for_stage(global.stage).connectObject(
             'notify::scale-factor', () => this._updateStrut(), this);
@@ -276,6 +282,13 @@ export default class DynlandExtension extends Extension {
             this._safeDisable(activity);
         }
         this._manager.release(id);
+    }
+
+    // Windows reach under the island and it does not hide: closed, it is an
+    // empty pill that opens on hover.
+    _syncBare() {
+        this._island.setBare(!this._settings.get_boolean('reserve-space') &&
+            !this._settings.get_boolean('auto-hide'));
     }
 
     _updateStrut() {

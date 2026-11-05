@@ -63,6 +63,11 @@
       <default>true</default>
       <summary>Keep maximised windows below the island</summary>
     </key>
+    <key name="auto-hide" type="b">
+      <default>true</default>
+      <summary>Hide the island while a window covers it (when windows are not kept below it)</summary>
+      <description>When off, the island stays over windows as an empty black pill that opens on hover.</description>
+    </key>
     <key name="style" type="s">
       <choices>
         <choice value="solid"/>
