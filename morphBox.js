@@ -18,7 +18,7 @@ const CONTENT_IN_MS = 140;
 const CONTENT_IN_DELAY_MS = 70;
 const CONTENT_IN_SCALE = 0.97;
 const EXPANDED_RADIUS = 24; // CSS px: St scales inline px by the theme scale factor
-export const TOP_MARGIN = 6;
+export const TOP_MARGIN = 0; // flush with the screen edge, like a MacBook notch
 
 export function scaleFactor() {
     return St.ThemeContext.get_for_stage(global.stage).scale_factor;
@@ -403,6 +403,11 @@ class MorphBox extends St.BoxLayout {
         if (r === this._radius)
             return;
         this._radius = r;
-        this.set_style(`border-radius: ${r}px;`);
+        this.set_style(this._radiusStyle(r));
+    }
+
+    /** Optional override: the inline style for corner radius `r` (CSS px). */
+    _radiusStyle(r) {
+        return `border-radius: ${r}px;`;
     }
 });

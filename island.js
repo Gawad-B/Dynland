@@ -398,6 +398,11 @@ class Island extends MorphBox {
 
     // Only the top edge is set here (x is centred in vfunc_allocate), and only
     // when it changes, so width changes never move the island mid-layout.
+    // A notch: it hangs from the top edge, so only the bottom corners are round.
+    _radiusStyle(r) {
+        return `border-radius: 0 0 ${r}px ${r}px;`;
+    }
+
     // Where the island's left edge is drawn. Its `x` reads as 0 while a
     // relayout is pending (the fixed position; it centres itself in
     // vfunc_allocate), so answer from the allocation or the same centring.
