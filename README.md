@@ -8,11 +8,22 @@ the island, so the island stays usable. Every feature can be switched off in the
 
 ## Install
 
-    ./scripts/install.sh
+    git clone https://github.com/Gawad-B/Dynland.git
+    cd Dynland
+    make install
 
-On Wayland, log out and back in so GNOME Shell loads the newly installed extension, then:
+Then log out and back in. `make install` also enables the extension, so there is
+nothing else to do, and it installs a copy: you can delete the clone afterwards.
 
-    gnome-extensions enable dynland@gawad-b.github.io
+It needs `make` and `glib-compile-schemas` (Fedora: `glib2`; Debian/Ubuntu:
+`libglib2.0-bin`).
+
+To share it without git, `make package` builds `build/dynland@gawad-b.github.io.zip`;
+on the other machine run `gnome-extensions install --force <zip>`, then log out and in
+and `gnome-extensions enable dynland@gawad-b.github.io`.
+
+`make uninstall` removes it. For development, `make link` links this checkout
+instead of copying it, so edits apply on the next shell restart.
 
 ## Use
 
