@@ -54,5 +54,7 @@ test:
 nested:
 	./scripts/nested.sh
 
+# Keeps schemas/gschemas.compiled: a `make link` install runs straight from
+# this checkout and fails to load without it.
 clean:
-	rm -rf build schemas/gschemas.compiled
+	rm -rf build
