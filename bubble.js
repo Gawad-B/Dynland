@@ -1,6 +1,19 @@
 // The activity bubble: a small pill that splits off beside the island to show
 // a live activity (music, a notification, volume...), so the island itself
 // stays usable. Hovering or clicking it opens the activity's expanded card.
+//
+// Placement (fixed per bubble, chosen by the extension per layout):
+//   'beside'   right of the island (or of the previous bubble); the island layout.
+//   'notch'    bar layout: drawn exactly over the island, which stays the plain
+//              empty notch underneath. Centred on the monitor, flush with the
+//              top, never smaller than the closed notch, bar-high while compact,
+//              notch corners (flat top, round bottom). Hover or click opens the
+//              expanded card downward from it.
+//   'dropdown' bar layout: a card centred under the bar with a small gap,
+//              showing the expanded card if the activity has one (else the
+//              compact row), fully rounded. Hovering only holds its timeout.
+// Notch and dropdown are centred in vfunc_allocate, as part of the layout
+// (like the island), never by moving them from a width handler.
 
 import Clutter from 'gi://Clutter';
 import Graphene from 'gi://Graphene';
@@ -9,8 +22,10 @@ import GObject from 'gi://GObject';
 import Meta from 'gi://Meta';
 import St from 'gi://St';
 
-import {BAR_HEIGHT} from './bar.js';
-import {MorphBox, scaleFactor} from './morphBox.js';
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+
+import {BAR_HEIGHT, NOTCH_WIDTH} from './bar.js';
+import {MorphBox, TOP_MARGIN, scaleFactor} from './morphBox.js';
 
 const GAP = 8; // logical px between the island and the bubble
 // The island's empty pill (stylesheet .dynland-bare) is 80x24 with no padding;
@@ -22,6 +37,9 @@ const BARE_PADDING = 2;
 const POP_IN_MS = 220;
 const POP_OUT_MS = 140;
 const POP_SCALE = 0.4;
+// The notch bubble grows sideways out of the notch instead.
+const NOTCH_POP_SCALE_X = 0.6;
+const DROPDOWN_GAP = 6; // logical px between the bar and a dropdown card
 const SLIDE_MS = 200;
 
 export const Bubble = GObject.registerClass({
@@ -38,10 +56,17 @@ export const Bubble = GObject.registerClass({
      *   shows, otherwise right of the island
      * @param {object} deps
      * @param {(id: string, error: Error) => void} deps.onActivityError
+     * @param {'beside'|'notch'|'dropdown'} [deps.placement] see the file comment
      */
-    constructor(settings, island, previous, {onActivityError}) {
-        super(settings, {name: 'dynlandBubble', style_class: 'dynland-bubble', visible: false});
+    constructor(settings, island, previous, {onActivityError, placement = 'beside'}) {
+        super(settings, {
+            name: 'dynlandBubble',
+            style_class: placement === 'notch' ? 'dynland-bubble dynland-bubble-notch' : 'dynland-bubble',
+            visible: false,
+        });
 
+        this._placement = placement;
+        this._fixedY = null; // notch and dropdown: the top edge last set
         this._island = island;
         this._previous = previous;
         this._anchor = null;
@@ -63,22 +88,31 @@ export const Bubble = GObject.registerClass({
             style_class: 'dynland-row dynland-activity',
             y_expand: true,
             y_align: Clutter.ActorAlign.CENTER,
+            // Closed notch: the content sits in the middle of it.
+            ...(placement === 'notch' ? {x_align: Clutter.ActorAlign.CENTER} : {}),
         });
         this._expandedBin = new St.Bin({style_class: 'dynland-activity', visible: false});
         this.add_child(this._compactBin);
         this.add_child(this._expandedBin);
         this._initContainers();
-        // Pops out of the island's side.
-        this.pivot_point = new Graphene.Point({x: 0, y: 0.5});
+        // Beside: pops out of the island's side. Notch and dropdown grow from the top centre.
+        this.pivot_point = placement === 'beside'
+            ? new Graphene.Point({x: 0, y: 0.5})
+            : new Graphene.Point({x: 0.5, y: 0});
 
         this._clickGesture = new Clutter.ClickGesture();
-        this._clickGesture.connect('recognize', () => this._setActivityExpanded(!this._activityExpanded));
+        // A dropdown card is already open; clicking its empty space does nothing.
+        this._clickGesture.connect('recognize', () => {
+            if (this._placement !== 'dropdown')
+                this._setActivityExpanded(!this._activityExpanded);
+        });
         this.add_action_full('dynland-bubble-toggle', Clutter.EventPhase.TARGET, this._clickGesture);
 
         // The island notifies these mid-layout; following it right there
         // would leave the bubble without an allocation (and undrawn) for a frame.
         this._followId = 0;
-        for (const actor of [island, previous].filter(Boolean)) {
+        // Only a bubble beside the island follows it (and the bubble before it).
+        for (const actor of placement === 'beside' ? [island, previous].filter(Boolean) : []) {
             actor.connectObject(
                 'notify::x', () => this._queueFollow(),
                 'notify::y', () => this._queueFollow(),
@@ -87,7 +121,7 @@ export const Bubble = GObject.registerClass({
                 'notify::visible', () => this._queueFollow(),
                 'notify::style-class', () => this._syncBare(), this);
         }
-        this.connect('notify::hover', () => this._setActivityExpanded(this.hover));
+        this.connect('notify::hover', () => this._onHover());
         this.connect('destroy', () => {
             if (this._followId)
                 global.compositor.get_laters().remove(this._followId);
@@ -101,6 +135,22 @@ export const Bubble = GObject.registerClass({
     /** @type {?{id: string, content: object}} */
     get activity() {
         return this._activity;
+    }
+
+    /** @type {'beside'|'notch'|'dropdown'} */
+    get placement() {
+        return this._placement;
+    }
+
+    // Where the left edge is drawn (it centres itself in vfunc_allocate, so
+    // its `x` is meaningless): the allocation, else the same centring.
+    get drawnX() {
+        if (this.has_allocation())
+            return this.get_allocation_box().x1;
+        const monitor = Main.layoutManager.primaryMonitor;
+        if (!monitor || !this._live())
+            return this.x;
+        return Math.floor(monitor.x + (monitor.width - this.width) / 2);
     }
 
     /** AutoHide: true once slid off the top for a fullscreen window, false when it returns. */
@@ -121,7 +171,9 @@ export const Bubble = GObject.registerClass({
             this._heldId = null;
         }
         this._activity = current;
-        this._activityExpanded = !!current && this.hover && !!current.content.expanded;
+        // A dropdown always shows its card when it has one.
+        this._activityExpanded = !!current && !!current.content.expanded &&
+            (this._placement === 'dropdown' || this.hover);
 
         if (!current) {
             this._popOut();
@@ -132,7 +184,7 @@ export const Bubble = GObject.registerClass({
         if (!wasShown || !this._wanted || this._poppingOut)
             this._popIn();
         // A new activity that opens under the pointer is held open like a hovered one.
-        if (this._activityExpanded && !this._heldId) {
+        if ((this._placement === 'dropdown' ? this.hover : this._activityExpanded) && !this._heldId) {
             this._heldId = current.id;
             this.emit('activity-hover', current.id, true);
         }
@@ -151,8 +203,9 @@ export const Bubble = GObject.registerClass({
             this.set_scale(1, 1);
             return;
         }
+        const [popX, popY] = this._popScale();
         this.opacity = 0;
-        this.set_scale(POP_SCALE, POP_SCALE);
+        this.set_scale(popX, popY);
         // Opacity must not use EASE_OUT_BACK: its overshoot goes past 255,
         // which wraps to nearly transparent and flashes the bubble.
         this.ease({
@@ -166,6 +219,10 @@ export const Bubble = GObject.registerClass({
             duration: POP_IN_MS,
             mode: Clutter.AnimationMode.EASE_OUT_BACK,
         });
+    }
+
+    _popScale() {
+        return this._placement === 'notch' ? [NOTCH_POP_SCALE_X, 1] : [POP_SCALE, POP_SCALE];
     }
 
     _popOut() {
@@ -184,8 +241,8 @@ export const Bubble = GObject.registerClass({
         this._poppingOut = true;
         this.ease({
             opacity: 0,
-            scale_x: POP_SCALE,
-            scale_y: POP_SCALE,
+            scale_x: this._popScale()[0],
+            scale_y: this._popScale()[1],
             duration: POP_OUT_MS,
             mode: Clutter.AnimationMode.EASE_IN_QUAD,
             onComplete: () => {
@@ -209,6 +266,38 @@ export const Bubble = GObject.registerClass({
         this._render();
     }
 
+    _onHover() {
+        if (this._placement === 'dropdown')
+            this._setHeld(this.hover);
+        else
+            this._setActivityExpanded(this.hover);
+    }
+
+    // Pauses (held) or restarts the live activity's timeout.
+    _setHeld(held) {
+        const id = this._activity?.id ?? this._heldId;
+        if (!id || held === !!this._heldId)
+            return;
+        this._heldId = held ? id : null;
+        this.emit('activity-hover', id, held);
+    }
+
+    // Centred on the primary monitor as part of the layout (see the file comment).
+    vfunc_allocate(box) {
+        const monitor = this._placement === 'beside' ? null : Main.layoutManager.primaryMonitor;
+        if (monitor) {
+            const width = box.get_width();
+            const x = Math.floor(monitor.x + (monitor.width - width) / 2);
+            box = Clutter.ActorBox.new(x, box.y1, x + width, box.y2);
+        }
+        super.vfunc_allocate(box);
+    }
+
+    // Notch corners for the notch; the default round ones otherwise.
+    _radiusStyle(r) {
+        return this._placement === 'notch' ? `border-radius: 0 0 ${r}px ${r}px;` : super._radiusStyle(r);
+    }
+
     vfunc_get_preferred_height(forWidth) {
         return this._withIslandHeight(super.vfunc_get_preferred_height(forWidth));
     }
@@ -219,7 +308,14 @@ export const Bubble = GObject.registerClass({
     }
 
     _withIslandHeight([min, nat]) {
-        if (this._activityExpanded || !this._island._live())
+        if (this._activityExpanded)
+            return [min, nat];
+        if (this._placement !== 'beside') {
+            // The notch is as tall as the bar while compact; a dropdown is as tall as its content.
+            const closed = this._placement === 'notch' ? Math.round(BAR_HEIGHT * scaleFactor()) : 0;
+            return [Math.max(min, closed), Math.max(nat, closed)];
+        }
+        if (!this._island._live())
             return [min, nat];
         const height = this._island.height;
         return [Math.max(min, height), Math.max(nat, height)];
@@ -261,11 +357,21 @@ export const Bubble = GObject.registerClass({
     // Off the stage (or with the island off it) nothing is measured or
     // resized; it syncs on arriving (_onStage) and on the island's next change.
     _syncBare() {
-        if (!this._live() || !this._island._live())
+        if (this._placement === 'dropdown' || !this._live())
+            return;
+        if (this._placement === 'notch') {
+            // The closed notch: its own size, whatever the island underneath does.
+            this._setBare(!this._activityExpanded, BAR_HEIGHT);
+            return;
+        }
+        if (!this._island._live())
             return;
         const notch = this._island.has_style_class_name('dynland-notch');
         const bare = (notch || this._island.has_style_class_name('dynland-bare')) && !this._activityExpanded;
-        const height = notch ? BAR_HEIGHT : BARE_HEIGHT;
+        this._setBare(bare, notch ? BAR_HEIGHT : BARE_HEIGHT);
+    }
+
+    _setBare(bare, height) {
         if (bare === this._bare && (!bare || height === this._bareHeight))
             return;
         this._bare = bare;
@@ -288,7 +394,7 @@ export const Bubble = GObject.registerClass({
     _withBareWidth([min, nat]) {
         if (!this._bare)
             return [min, nat];
-        const width = BARE_WIDTH * scaleFactor();
+        const width = (this._placement === 'notch' ? NOTCH_WIDTH : BARE_WIDTH) * scaleFactor();
         return [Math.max(min, width), Math.max(nat, width)];
     }
 
@@ -324,6 +430,20 @@ export const Bubble = GObject.registerClass({
     }
 
     _reposition() {
+        if (this._placement !== 'beside') {
+            // Only the top edge is set (x is centred in vfunc_allocate), and
+            // only when it changes: it changes with the monitor or the scale.
+            const monitor = Main.layoutManager.primaryMonitor;
+            if (!monitor || !this._live())
+                return;
+            const top = this._placement === 'notch' ? TOP_MARGIN : BAR_HEIGHT + DROPDOWN_GAP;
+            const y = monitor.y + top * scaleFactor();
+            if (this._fixedY !== y) {
+                this._fixedY = y;
+                this.set_position(monitor.x, y);
+            }
+            return;
+        }
         const island = this._island;
         if (!this._live() || !island._live())
             return;

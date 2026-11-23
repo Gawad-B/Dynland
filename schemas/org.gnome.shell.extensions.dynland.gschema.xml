@@ -71,6 +71,18 @@
       <default>false</default>
       <summary>In the bar layout, the notch still opens on hover with pages of indicators</summary>
     </key>
+    <key name="bar-start-indicators" type="as">
+      <default>[]</default>
+      <summary>Bar layout: indicators shown on the start (left) side, after the app name</summary>
+    </key>
+    <key name="bar-quick-indicators" type="as">
+      <default>[]</default>
+      <summary>Bar layout: Quick Settings indicators shown on the bar itself beside the control-centre icon (network, bluetooth, volume, microphone, battery, ...)</summary>
+    </key>
+    <key name="bar-icon-only" type="as">
+      <default>['vitalsMenu']</default>
+      <summary>Bar layout: indicators shown as a single icon, without their text</summary>
+    </key>
     <key name="reserve-space" type="b">
       <default>true</default>
       <summary>Keep maximised windows below the island</summary>

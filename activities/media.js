@@ -9,6 +9,7 @@ import St from 'gi://St';
 import * as Mpris from 'resource:///org/gnome/shell/ui/mpris.js';
 
 import {Priority} from '../lib/activityManager.js';
+import {LevelTrack} from './osd.js';
 
 export const ID = 'media';
 const PAUSED_LINGER_MS = 10000;
@@ -262,22 +263,13 @@ export class MediaActivity {
             style_class: 'dynland-media-time',
             y_align: Clutter.ActorAlign.CENTER,
         });
-        const track = new St.Widget({
-            style_class: 'dynland-level-track',
+        // The fill is placed by the track's own allocation (see LevelTrack):
+        // never set its width from an allocation notification.
+        const track = new LevelTrack({
             x_expand: true,
             y_expand: true,
             y_align: Clutter.ActorAlign.CENTER,
-            clip_to_allocation: true,
         });
-        const fill = new St.Widget({style_class: 'dynland-level-fill'});
-        track.add_child(fill);
-        let ratio = 0;
-        // The track's allocation, not track.width (which can report a preferred size
-        // derived from the fill itself).
-        const layoutFill = () => {
-            fill.width = Math.round(track.get_allocation_box().get_width() * ratio);
-        };
-        track.connect('notify::allocation', layoutFill);
         progress.add_child(elapsed);
         progress.add_child(track);
         progress.add_child(total);
@@ -321,10 +313,9 @@ export class MediaActivity {
                             const [props] = connection.call_finish(result).recursiveUnpack();
                             const length = props.Metadata?.['mpris:length'] ?? 0;
                             const position = props.Position ?? 0;
-                            ratio = length > 0 ? Math.max(0, Math.min(1, position / length)) : 0;
+                            track.setRatio(length > 0 ? position / length : 0);
                             elapsed.text = formatTime(position);
                             total.text = length > 0 ? formatTime(length) : '--:--';
-                            layoutFill();
                         } catch {
                             // Player went away or doesn't report position; keep the bar as it was.
                         }

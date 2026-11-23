@@ -12,6 +12,7 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import {AppMenuButton} from './appMenu.js';
 import {AutoHide} from './autoHide.js';
 import {MenuBar} from './bar.js';
+import {BarMotion} from './barMotion.js';
 import {Bubble} from './bubble.js';
 import {Corner, Island} from './island.js';
 import {PanelBridge} from './panelBridge.js';
@@ -34,8 +35,10 @@ const ACTIVITIES = {
 // Mutter keybinding names are global, so keep ours distinctive.
 const KEYBINDING = 'dynland-toggle';
 
-// At most this many activities show at once, each in its own bubble.
+// At most this many activities show at once, each in its own bubble. In bar
+// layout the first is the notch's and the second a dropdown under the bar.
 const MAX_BUBBLES = 2;
+const BAR_PLACEMENTS = ['notch', 'dropdown'];
 
 // Idle pill (36px) + top margin (6px) + gap (6px), in logical pixels.
 const STRUT_HEIGHT = 48;
@@ -59,7 +62,11 @@ export default class DynlandExtension extends Extension {
         this._barLayout = this._arrangement !== 'island';
         this._bridge = new PanelBridge(this._settings);
         if (this._barLayout) {
-            this._bar = new MenuBar(this._settings);
+            // Nothing moves between the bar's sides while an indicator menu is open.
+            this._bar = new MenuBar(this._settings, {
+                anyMenuOpen: () => this._bridge?.anyMenuOpen() ?? false,
+            });
+            this._motion = new BarMotion(this._settings, this._bar);
             this._appMenu = new AppMenuButton();
             this._bar.slot('barStart').insert_child_at_index(this._appMenu.container, 0);
         }
@@ -68,9 +75,13 @@ export default class DynlandExtension extends Extension {
         });
         this._bubbles = [];
         for (let i = 0; i < MAX_BUBBLES; i++) {
-            this._bubbles.push(new Bubble(this._settings, this._island, this._bubbles.at(-1) ?? null, {
-                onActivityError: (id, error) => this._onActivityError(id, error),
-            }));
+            // Beside the island each bubble follows the one before it; in bar
+            // layout they sit over and under the notch, chained to nothing.
+            this._bubbles.push(new Bubble(this._settings, this._island,
+                this._barLayout ? null : this._bubbles.at(-1) ?? null, {
+                    onActivityError: (id, error) => this._onActivityError(id, error),
+                    placement: this._barLayout ? BAR_PLACEMENTS[i] : 'beside',
+                }));
         }
         this._corner = new Corner(this._settings);
         this._manager = new ActivityManager({
@@ -93,13 +104,26 @@ export default class DynlandExtension extends Extension {
         // tracking would show it again). The island and bubbles slide off the
         // top for a fullscreen window (AutoHide); GNOME's tracking would hide
         // the island in one frame before the slide.
-        // The bar goes first so the island and bubbles are stacked above it;
-        // it is the strut in bar layout.
-        if (this._bar)
-            Main.layoutManager.addChrome(this._bar, {affectsStruts: true, trackFullscreen: true});
+        // The bar goes first so the island and bubbles are stacked above it.
+        // It sits in a clip (BarMotion) and moves for fullscreen and workspace
+        // switches by itself, so GNOME must neither hide it nor count it as the
+        // strut (struts follow an actor's transformed geometry): an invisible
+        // band of its size, which never moves, is the strut in bar layout.
+        // The clip takes no input: GNOME 51 has no input region built from
+        // chrome (addChrome only tracks struts and fullscreen), and a
+        // non-reactive actor is never picked, so the pointer reaches the
+        // windows under it; only the reactive bar inside takes input, and
+        // nothing while it is hidden off screen (BarMotion hides it).
+        if (this._motion) {
+            Main.layoutManager.addChrome(this._motion.strut, {affectsStruts: true, trackFullscreen: true});
+            Main.layoutManager.addChrome(this._motion.clip, {affectsStruts: false, trackFullscreen: false});
+        }
         Main.layoutManager.addChrome(this._island, {affectsStruts: false, trackFullscreen: false});
         for (const actor of [this._corner, ...this._bubbles])
             Main.layoutManager.addChrome(actor, {affectsStruts: false, trackFullscreen: false});
+        // The bar's sides keep clear of the island (closed notch or opened)
+        // and of the notch bubble, at their current widths.
+        this._bar?.watchCentre([this._island, this._bubbles[0]]);
         this._bridge.enable(name => {
             if (name === 'corner')
                 return this._corner.slot();
@@ -110,6 +134,7 @@ export default class DynlandExtension extends Extension {
         this._autoHide = new AutoHide(this._settings, this._island, this._bubbles,
             () => this._bridge.anyMenuOpen());
         this._autoHide.enable();
+        this._motion?.enable();
 
         this._updateStrut();
         this._syncBare();
@@ -223,6 +248,7 @@ export default class DynlandExtension extends Extension {
         this._activities?.clear();
         this._autoHide?.disable();
         this._autoHide = null;
+        this._motion?.disable();
         this._manager?.clear();
 
         // Off the stage first: a relayout queued while indicators leave would
@@ -234,7 +260,9 @@ export default class DynlandExtension extends Extension {
         // destroyed actor ("Spurious clutter_actor_allocate", St's "not in the
         // stage"). So run the waiting layout now, while they are all still on
         // the stage (reading an allocation that is due lays the stage out).
-        const actors = [...this._bubbles ?? [], this._corner, this._island, this._bar].filter(Boolean);
+        // The bar is destroyed with its clip.
+        const actors = [...this._bubbles ?? [], this._corner, this._island,
+            ...this._motion ? [this._motion.clip, this._motion.strut] : [this._bar]].filter(Boolean);
         for (const actor of actors) {
             if (actor.get_stage())
                 actor.get_allocation_box();
@@ -258,6 +286,7 @@ export default class DynlandExtension extends Extension {
 
         this._appMenu = null;
         this._bar = null;
+        this._motion = null;
         this._barLayout = false;
         this._arrangement = null;
         this._island = null;
@@ -300,6 +329,10 @@ export default class DynlandExtension extends Extension {
     // An activity keeps its bubble while it lasts; a new one takes a free
     // bubble. With two showing, the island shrinks to the clock to make room.
     _onActiveChange(active) {
+        if (this._barLayout) {
+            this._placeInBar(active);
+            return;
+        }
         const shown = active.slice(0, MAX_BUBBLES);
         const free = [];
         for (const bubble of this._bubbles) {
@@ -319,6 +352,41 @@ export default class DynlandExtension extends Extension {
         for (const bubble of free)
             bubble.setActivity(null);
         this._island.setCompact(shown.length > 1);
+    }
+
+    // Bar layout: the notch holds one activity, a dropdown under the bar a
+    // second. An activity keeps its place while it lasts: the one in the notch
+    // stays when another arrives, and a dropdown stays a dropdown when the
+    // notch's activity ends (nothing is moved between the two mid-life). A
+    // free notch takes the next activity to appear, and when several wait it
+    // takes the least important one, the one `active` lists last (lowest
+    // priority: media, then the prayer countdown, then power, OSD,
+    // notification; the oldest among equals): the long-lived activity lives
+    // in the notch and the transient one drops down. The dropdown takes the
+    // most important of the rest. Anything beyond two waits for a free place.
+    _placeInBar(active) {
+        const [notch, dropdown] = this._bubbles;
+        for (const bubble of this._bubbles) {
+            const activity = active.find(a => a.id === bubble.activity?.id);
+            if (!activity)
+                bubble.setActivity(null);
+            else if (activity.content !== bubble.activity.content)
+                bubble.setActivity(activity);
+        }
+        const waiting = active.filter(a => !this._bubbles.some(b => b.activity?.id === a.id));
+        let arrived = false;
+        if (!notch.activity && waiting.length) {
+            notch.setActivity(waiting.pop());
+            arrived = true;
+        }
+        if (!dropdown.activity && waiting.length) {
+            dropdown.setActivity(waiting.shift());
+            arrived = true;
+        }
+        if (arrived)
+            this._autoHide?.showForActivity();
+        // The notch opens onto the pages only while it holds no activity.
+        this._syncBare();
     }
 
     // An activity that throws is turned off for this session; its setting is untouched.
@@ -371,8 +439,9 @@ export default class DynlandExtension extends Extension {
         if (this._barLayout) {
             this._island.setBare(false);
             this._island.setNotch(true);
-            // Opens only with pages, and only onto an indicator (Island._canExpand).
-            this._island.setExpandable(this._arrangement === 'bar+pages');
+            // Opens only with pages, and only onto an indicator (Island._canExpand),
+            // and not while an activity sits in the notch (it shows its card instead).
+            this._island.setExpandable(this._arrangement === 'bar+pages' && !this._bubbles?.[0]?.activity);
             return;
         }
         this._island.setBare(!this._settings.get_boolean('reserve-space') &&
@@ -382,7 +451,7 @@ export default class DynlandExtension extends Extension {
     _updateStrut() {
         this._removeStrut();
         const monitor = Main.layoutManager.primaryMonitor;
-        // The bar is the strut in bar layout.
+        // The bar has its own strut actor (BarMotion) in bar layout.
         if (this._barLayout || !this._settings.get_boolean('reserve-space') || !monitor)
             return;
 

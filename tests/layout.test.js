@@ -134,3 +134,44 @@ test('bar false leaves barStart, barStatus and barClock empty', () => {
     const r = splitIndicators(PANEL, {...DEFAULTS, bar: false});
     assertEqual([r.barStart, r.barStatus, r.barClock], [[], [], []]);
 });
+
+const START = ['vitalsMenu', 'appindicator-*', 'keyboard'];
+
+test('bar start: indicators leave barStatus (pages off), after activities, in list order', () => {
+    const r = splitIndicators(PANEL, {...BAR, barStartIndicators: START});
+    assertEqual(r.barStart, ['activities', 'vitalsMenu', 'appindicator-2', 'appindicator-1', 'keyboard']);
+    assertEqual(r.barStatus, ['apps-menu', 'clipboardIndicator', 'prayer-times', 'screenSharing', 'quickSettings']);
+});
+
+test('bar start: indicators leave home and more (pages on)', () => {
+    const r = splitIndicators(PANEL, {...BAR, barNotchPages: true, barStartIndicators: ['apps-menu', 'keyboard']});
+    assertEqual(r.barStart, ['activities', 'apps-menu', 'keyboard']);
+    assertEqual(r.more, ['vitalsMenu']);
+    assertEqual(r.home, ['clipboardIndicator', 'appindicator-2', 'appindicator-1']);
+});
+
+test('bar start: order follows the setting list, not the panel', () => {
+    const r = splitIndicators(PANEL, {...BAR, barStartIndicators: ['keyboard', 'apps-menu']});
+    assertEqual(r.barStart, ['activities', 'keyboard', 'apps-menu']);
+});
+
+test('bar start: wildcard matches every tray icon', () => {
+    const r = splitIndicators(PANEL, {...BAR, barStartIndicators: ['appindicator-*']});
+    assertEqual(r.barStart, ['activities', 'appindicator-2', 'appindicator-1']);
+});
+
+test('bar start: corner roles, dateMenu and activities never move', () => {
+    const r = splitIndicators(PANEL, {...BAR, barStartIndicators: ['quickSettings', 'screenSharing', 'dateMenu', 'activities']});
+    assertEqual(r.barStart, ['activities']);
+    assertEqual(r.barClock, ['dateMenu']);
+    assertEqual(r.barStatus.slice(-2), ['screenSharing', 'quickSettings']);
+});
+
+test('bar start: showTrayIndicators off drops tray roles but keeps idle ones', () => {
+    const r = splitIndicators(PANEL, {...BAR, showTrayIndicators: false, barStartIndicators: ['vitalsMenu', 'prayer-times']});
+    assertEqual(r.barStart, ['activities', 'prayer-times']);
+});
+
+test('bar start: ignored when bar is false', () => {
+    assertEqual(splitIndicators(PANEL, {...DEFAULTS, barStartIndicators: START}), splitIndicators(PANEL, DEFAULTS));
+});

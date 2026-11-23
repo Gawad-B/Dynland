@@ -39,8 +39,9 @@ const ACTIVITY_SHOW_MS = 3000; // a new live activity shows the island this long
 // to Dock's own delays, so a window flickering over the spot (an app
 // resizing, an animation passing by) cannot flash the island.
 const SETTLE_MS = 250;
-const SLIDE_OUT_MS = 400;
-const SLIDE_IN_MS = 200;
+// The slide's duration (and EASE_OUT_CUBIC): the menu bar's fullscreen slide uses the same.
+export const SLIDE_OUT_MS = 400;
+export const SLIDE_IN_MS = 200;
 
 // Windows that make the island hide.
 const OVERLAP_TYPES = [
@@ -290,12 +291,23 @@ export class AutoHide {
     // monitor down (positions ignore the slide, so this is where it shows).
     // Normal windows and dialogs make it hide; for the compositing hold every
     // kind counts (`anyType`), since any of them can cover the monitor.
+    // In bar layout the activity bubbles (over and under the notch) are drawn
+    // outside the island's rectangle, so their own areas count too (a bubble
+    // beside the island, in island layout, never added any).
     _overlapping(anyType = false) {
         const monitor = Main.layoutManager.primaryMonitor;
         if (!monitor)
             return [];
         const spot = this._spot();
-        return this._windowsUnder({x1: spot.x, x2: spot.x + spot.width, y1: monitor.y, y2: spot.y + spot.height, monitor}, anyType);
+        const found = new Set(this._windowsUnder({x1: spot.x, x2: spot.x + spot.width, y1: monitor.y, y2: spot.y + spot.height, monitor}, anyType));
+        for (const bubble of this._bubbles) {
+            if (bubble.placement === 'beside' || !bubble.mapped || !bubble.get_stage())
+                continue;
+            const x1 = bubble.drawnX;
+            for (const window of this._windowsUnder({x1, x2: x1 + bubble.width, y1: monitor.y, y2: bubble.y + bubble.height, monitor}, anyType))
+                found.add(window);
+        }
+        return [...found];
     }
 
     // Windows on the current workspace and `area.monitor` that reach into `area`.
@@ -439,7 +451,15 @@ export class AutoHide {
     // `done` runs once the island has finished moving (or at once without motion).
     _slide(hide, done, instant = false) {
         const spot = this._spot();
-        const offset = hide ? -(spot.y + spot.height + 4 * scaleFactor()) : 0;
+        // Everything shown must clear the top: the island (opened or not) and
+        // every bubble, whose open card can hang well below the island (the
+        // notch's card, a dropdown under the bar, a card beside the island).
+        let bottom = spot.y + spot.height;
+        for (const bubble of this._bubbles) {
+            if (bubble.visible && bubble.get_stage())
+                bottom = Math.max(bottom, bubble.y + bubble.height);
+        }
+        const offset = hide ? -(bottom + 4 * scaleFactor()) : 0;
         const animate = !instant && motionAllowed(this._settings);
         for (const actor of this._actors()) {
             actor.remove_transition('translation-y');

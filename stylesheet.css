@@ -161,3 +161,7 @@
 /* Opened onto its pages, the notch is never narrower than closed (min-width is
    the content's; the expanded padding comes on top). */
 .dynland-island.dynland-notch-open { min-width: 180px; }
+/* An activity in the bar's notch: the notch's black (never the translucent
+   tint), with the bar-high closed size set as geometry in bubble.js. */
+.dynland-bubble.dynland-bubble-notch,
+.dynland-bubble.dynland-bubble-notch.dynland-translucent { background-color: #000000; }

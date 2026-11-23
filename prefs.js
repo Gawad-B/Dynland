@@ -90,9 +90,18 @@ export default class DynlandPreferences extends ExtensionPreferences {
         const reserveSpace = switchRow(settings, 'reserve-space', 'Keep windows below the island', 'Maximised windows start under the island. When off, windows reach under it and the option below applies');
         const autoHide = switchRow(settings, 'auto-hide', 'Hide while a window covers the island',
             'Like Dash to Dock: push the pointer to the top edge to bring it back. When off, the island stays as an empty black pill that opens on hover');
+        const barQuick = listRow(settings, 'bar-quick-indicators', 'Quick Settings items on the bar (comma-separated)');
+        barQuick.tooltip_text = 'Accepted names: network, bluetooth, volume, microphone, battery, nightlight, rfkill, location, camera';
+        const barGroup = group('MacBook bar', [
+            listRow(settings, 'bar-start-indicators', 'Left side (comma-separated)'),
+            barQuick,
+            listRow(settings, 'bar-icon-only', 'Icon only (comma-separated)'),
+        ], 'Role names as in Indicator placement; these apply to the MacBook bar layout only. ' +
+            'Quick Settings items: network, bluetooth, volume, microphone, battery, nightlight, rfkill, location, camera.');
         const syncSensitivity = () => {
             const isBar = settings.get_string('layout') === 'bar';
             barNotchPages.sensitive = isBar;
+            barGroup.sensitive = isBar;
             reserveSpace.sensitive = !isBar;
             autoHide.sensitive = !isBar && !settings.get_boolean('reserve-space');
         };
@@ -106,6 +115,8 @@ export default class DynlandPreferences extends ExtensionPreferences {
             reserveSpace,
             autoHide,
         ]));
+
+        page.add(barGroup);
         return page;
     }
 

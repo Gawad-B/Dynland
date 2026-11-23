@@ -8,13 +8,15 @@ import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {splitIndicators} from './lib/layout.js';
+import {IndicatorTrimmer, QuickSettingsCondenser} from './barCompact.js';
+import {matchesRole, splitIndicators} from './lib/layout.js';
 
 // Not `layout` or `bar-notch-pages`: a change there rebuilds the whole
 // extension (extension.js), bridge included; refresh() only reads them.
 const LAYOUT_KEYS = [
     'show-clock', 'show-quick-settings', 'show-activities',
     'show-tray-indicators', 'idle-indicators', 'home-indicators',
+    'bar-start-indicators', 'bar-quick-indicators', 'bar-icon-only',
 ];
 
 export class PanelBridge {
@@ -28,6 +30,8 @@ export class PanelBridge {
         this._addToPanelBoxDescriptor = null;
         this._untracked = false;
         this._wrapped = false;
+        this._trimmer = null;
+        this._condenser = null;
     }
 
     /**
@@ -118,20 +122,44 @@ export class PanelBridge {
             showTrayIndicators: this._settings.get_boolean('show-tray-indicators'),
             idleIndicators: this._settings.get_strv('idle-indicators'),
             homeIndicators: this._settings.get_strv('home-indicators'),
+            barStartIndicators: this._settings.get_strv('bar-start-indicators'),
             // Quick Settings always lives at the end of the island's second page.
             cornerInIsland: true,
             bar: this._settings.get_string('layout') === 'bar',
             barNotchPages: this._settings.get_boolean('bar-notch-pages'),
         });
 
+        const lent = [];
         for (const [slot, roles] of Object.entries(split)) {
             if (!roles.length)
                 continue;
             const box = this._slotFor(slot);
             if (!box)
                 continue;
-            for (const role of roles)
+            for (const role of roles) {
                 this._borrow(role, box);
+                lent.push(role);
+            }
+        }
+
+        // Compact indicators only make sense on the bar.
+        if (this._settings.get_string('layout') === 'bar')
+            this._compact(lent);
+    }
+
+    // Quick Settings is condensed instead of trimmed: its icons are the
+    // system indicators, not text to drop.
+    _compact(lent) {
+        const iconOnly = this._settings.get_strv('bar-icon-only');
+        this._trimmer = new IndicatorTrimmer();
+        for (const role of lent) {
+            if (role !== 'quickSettings' && matchesRole(role, iconOnly))
+                this._trimmer.trim(Main.panel.statusArea[role]);
+        }
+        if (lent.includes('quickSettings')) {
+            this._condenser = new QuickSettingsCondenser();
+            this._condenser.apply(Main.panel.statusArea.quickSettings,
+                this._settings.get_strv('bar-quick-indicators'));
         }
     }
 
@@ -239,6 +267,11 @@ export class PanelBridge {
 
     // Undo in reverse order so every recorded index is valid again.
     _restoreAll() {
+        // Before the containers move, while the actors are still where we found them.
+        this._trimmer?.restoreAll();
+        this._trimmer = null;
+        this._condenser?.restore();
+        this._condenser = null;
         this._restoreMenus();
         for (const {indicator, container, parent, index, pad} of this._borrowed.reverse()) {
             if (pad && !pad.actor.get_parent())

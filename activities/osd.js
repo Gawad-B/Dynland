@@ -3,6 +3,7 @@
 
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
+import GObject from 'gi://GObject';
 import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -13,6 +14,48 @@ export const ID = 'osd';
 const TIMEOUT_MS = 1500;
 const TRACK_WIDTH = 120;
 const HANDLED_ICONS = /^(audio-volume|display-brightness)/;
+
+// A level bar: a rounded track with a fill child covering `ratio` of it. The
+// fill is placed by the track's own vfunc_allocate, so a ratio change only
+// queues a relayout of the track (outside any layout pass) and nothing sets a
+// size from an allocation notification while the parents are being laid out.
+export const LevelTrack = GObject.registerClass(
+class DynlandLevelTrack extends St.Widget {
+    _init(params = {}) {
+        super._init({
+            style_class: 'dynland-level-track',
+            clip_to_allocation: true,
+            ...params,
+        });
+        this._ratio = 0;
+        this._fill = new St.Widget({style_class: 'dynland-level-fill'});
+        this.add_child(this._fill);
+    }
+
+    setRatio(ratio) {
+        ratio = Number.isFinite(ratio) ? Math.max(0, Math.min(1, ratio)) : 0;
+        if (ratio === this._ratio)
+            return;
+        this._ratio = ratio;
+        this.queue_relayout();
+    }
+
+    vfunc_allocate(box) {
+        this.set_allocation(box);
+        const own = Clutter.ActorBox.new(0, 0, box.get_width(), box.get_height());
+        const content = this.get_theme_node().get_content_box(own);
+        const width = Math.max(0, content.x2 - content.x1);
+        const height = Math.max(0, content.y2 - content.y1);
+        const [, natHeight] = this._fill.get_preferred_height(-1);
+        const fillHeight = Math.min(height, natHeight > 0 ? natHeight : height);
+        const child = new Clutter.ActorBox();
+        child.x1 = content.x1;
+        child.x2 = content.x1 + Math.round(width * this._ratio);
+        child.y1 = content.y1 + Math.floor((height - fillHeight) / 2);
+        child.y2 = child.y1 + fillHeight;
+        this._fill.allocate(child);
+    }
+});
 
 export class OsdActivity {
     enable(manager) {
@@ -103,22 +146,17 @@ export class OsdActivity {
             y_align: Clutter.ActorAlign.CENTER,
         }));
 
-        // The track fills the middle; the fill is clipped to its rounded shape.
+        // The track fills the middle; the fill is clipped to its rounded shape
+        // and placed by the track's own allocation (see LevelTrack).
         // natural_width must be set too: a natural width below min_width is a fatal Clutter error.
-        const track = new St.Widget({
-            style_class: 'dynland-level-track',
+        const track = new LevelTrack({
             min_width: TRACK_WIDTH,
             natural_width: TRACK_WIDTH,
             x_expand: true,
             y_expand: true,
             y_align: Clutter.ActorAlign.CENTER,
-            clip_to_allocation: true,
         });
-        const fill = new St.Widget({style_class: 'dynland-level-fill'});
-        track.add_child(fill);
-        track.connect('notify::allocation', () => {
-            fill.width = Math.round(track.width * ratio);
-        });
+        track.setRatio(ratio);
         box.add_child(track);
 
         box.add_child(new St.Label({

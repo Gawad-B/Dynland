@@ -44,6 +44,9 @@ instead of copying it, so edits apply on the next shell restart.
   menu bar, with the notch in its middle, the focused app's name and menu on the left, and
   status icons and the clock on the right. Windows start right below it. "Notch opens on
   hover" chooses whether the notch still shows the indicator pages or stays empty.
+  Three lists in the "MacBook bar" group of the preferences choose which indicators sit on
+  the left after the app name, which Quick Settings items (network, volume, battery, ...)
+  show on the bar beside the control-centre icon, and which show as an icon without text.
 - The island lives on the primary monitor only.
 - Panel items that have no status-area role (rare) are hidden while Dynland is enabled.
 
