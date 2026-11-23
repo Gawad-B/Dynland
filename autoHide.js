@@ -4,6 +4,10 @@
 // slide up off the screen. Pushing the pointer against the top edge above
 // it, a new live activity, or the window moving away brings it back.
 //
+// A fullscreen window on the primary monitor slides them away the same way,
+// whatever the settings, and nothing brings them back until it ends. Once
+// off screen they are hidden outright, so they draw nothing and take no input.
+//
 // It also keeps the compositor drawing while the island is over a window.
 // Mutter puts the top window straight onto the display ("direct scanout";
 // find_candidate() in its meta-compositor-view-native.c) whenever that
@@ -23,7 +27,7 @@ import Meta from 'gi://Meta';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {motionAllowed, scaleFactor} from './morphBox.js';
+import {inFullscreen, motionAllowed, scaleFactor} from './morphBox.js';
 
 const CHECK_DELAY_MS = 100; // windows moving or resizing: re-check at most this often
 const POINTER_POLL_MS = 100; // while hidden: how often to look for the pointer at the top edge
@@ -62,9 +66,13 @@ export class AutoHide {
         this._bubbles = bubbles;
         this._anyMenuOpen = anyMenuOpen;
         this._hidden = false;
+        this._fullscreen = false; // a fullscreen window: slid away whatever auto-hide says
         this._offscreen = false; // slid all the way off the screen
         this._pointerReveal = false;
         this._activityReveal = false;
+        // An activity that started (or was still showing) during fullscreen:
+        // its reveal waits for fullscreen to end, then runs in full.
+        this._activityWaiting = false;
         this._checkId = 0;
         this._pollId = 0;
         this._leaveId = 0;
@@ -78,12 +86,24 @@ export class AutoHide {
     enable() {
         this._settings.connectObject(
             'changed::reserve-space', () => this._queueCheck(),
-            'changed::auto-hide', () => this._queueCheck(), this);
+            'changed::auto-hide', () => this._queueCheck(),
+            'changed::layout', () => this._queueCheck(), this);
         global.display.connectObject(
             'window-created', (_d, window) => this._trackWindow(window),
-            'restacked', () => this._queueCheck(), this);
+            'restacked', () => this._queueCheck(),
+            // After LayoutManager's handler, so inFullscreen is already current.
+            'in-fullscreen-changed', () => this._syncFullscreen(), this);
+        Main.layoutManager.connectObject('monitors-changed', () => this._syncFullscreen(), this);
         global.workspace_manager.connectObject('active-workspace-changed', () => this._queueCheck(), this);
-        Main.overview.connectObject('showing', () => this._update(true), 'hidden', () => this._update(true), this);
+        Main.overview.connectObject(
+            'showing', () => {
+                this._syncFullscreen();
+                this._update(true);
+            },
+            'hidden', () => {
+                this._syncFullscreen();
+                this._update(true);
+            }, this);
         this._island.connectObject(
             'notify::hover', () => this._onHover(),
             'notify::height', () => this._queueCheck(), this);
@@ -97,6 +117,7 @@ export class AutoHide {
             this._trackDock(child);
         for (const window of global.display.list_all_windows())
             this._trackWindow(window);
+        this._syncFullscreen(true);
         this._update();
         this._syncHold();
     }
@@ -106,6 +127,7 @@ export class AutoHide {
         global.display.disconnectObject(this);
         global.workspace_manager.disconnectObject(this);
         Main.overview.disconnectObject(this);
+        Main.layoutManager.disconnectObject(this);
         for (const actor of this._actors())
             actor.disconnectObject(this);
         Main.uiGroup.disconnectObject(this);
@@ -120,11 +142,15 @@ export class AutoHide {
                 GLib.source_remove(id);
         }
         this._checkId = this._pollId = this._leaveId = this._activityId = this._settleId = 0;
+        this._activityReveal = false;
+        this._activityWaiting = false;
         for (const actor of this._actors()) {
             actor.remove_transition('translation-y');
             actor.translation_y = 0;
         }
+        this._fullscreen = false;
         this._offscreen = false;
+        this._setShown(true);
         this._holdUnredirect(false);
     }
 
@@ -190,10 +216,21 @@ export class AutoHide {
             global.compositor.enable_unredirect();
     }
 
-    /** A new live activity started: show the island for a moment. */
+    /**
+     * A new live activity started: show the island for a moment. During
+     * fullscreen nothing may show, so the moment comes once it ends.
+     */
     showForActivity() {
-        if (this._activityId)
-            GLib.source_remove(this._activityId);
+        if (this._fullscreen) {
+            this._activityWaiting = true;
+            return;
+        }
+        this._startActivityReveal();
+        this._update(true);
+    }
+
+    _startActivityReveal() {
+        this._stopActivityReveal();
         this._activityReveal = true;
         this._activityId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, ACTIVITY_SHOW_MS, () => {
             this._activityId = 0;
@@ -201,7 +238,14 @@ export class AutoHide {
             this._update();
             return GLib.SOURCE_REMOVE;
         });
-        this._update(true);
+    }
+
+    _stopActivityReveal() {
+        if (this._activityId) {
+            GLib.source_remove(this._activityId);
+            this._activityId = 0;
+        }
+        this._activityReveal = false;
     }
 
     _actors() {
@@ -271,8 +315,11 @@ export class AutoHide {
     // Where the island shows: its allocation (it centres itself during
     // layout, so its `x` reads as 0 while a relayout is pending), ignoring
     // the slide. Before the first layout, its size and fixed position.
+    // Off the stage it has no spot (and must not be measured).
     _spot() {
         const island = this._island;
+        if (!island.get_stage())
+            return {x: 0, y: 0, width: 0, height: 0};
         const box = island.get_allocation_box();
         if (box.x2 > box.x1)
             return {x: box.x1, y: box.y1, width: box.x2 - box.x1, height: box.y2 - box.y1};
@@ -280,7 +327,9 @@ export class AutoHide {
     }
 
     _shouldHide() {
-        return !this._settings.get_boolean('reserve-space') &&
+        // The menu bar is always there, and so is its notch.
+        return this._settings.get_string('layout') !== 'bar' &&
+            !this._settings.get_boolean('reserve-space') &&
             this._settings.get_boolean('auto-hide') &&
             !Main.overview.visible &&
             !this._island.hover && !this._island.expanded && !this._anyMenuOpen() &&
@@ -314,11 +363,6 @@ export class AutoHide {
 
     _apply(hide) {
         this._hidden = hide;
-        if (!hide) {
-            // Held before the first frame that shows it.
-            this._offscreen = false;
-            this._syncHold();
-        }
 
         if (this._settings.get_boolean('debug-workspace-log')) {
             const windows = this._overlapping().map(w => `"${w.get_title()}"`).join(', ') || 'none';
@@ -326,21 +370,77 @@ export class AutoHide {
                 `pointer ${this._pointerReveal}, event ${this._activityReveal}, hover ${this._island.hover}, ` +
                 `overview ${Main.overview.visible}, compositing held ${this._unredirectHeld}`);
         }
+        this._present();
+    }
+
+    // A fullscreen window on the primary monitor slides the island and
+    // bubbles away at once (no settle delay), and back when it ends.
+    // An activity reveal cannot run out unseen during fullscreen: one still
+    // running when it starts waits, like one arriving during it, and both
+    // get their full time once it ends, whatever window is under the spot.
+    _syncFullscreen(instant = false) {
+        const fullscreen = inFullscreen();
+        if (fullscreen === this._fullscreen)
+            return;
+        this._fullscreen = fullscreen;
+        if (fullscreen && this._activityReveal) {
+            this._stopActivityReveal();
+            this._activityWaiting = true;
+        } else if (!fullscreen && this._activityWaiting) {
+            this._activityWaiting = false;
+            this._startActivityReveal();
+            // Settled now, so the one _present below already shows them.
+            if (this._settleId) {
+                GLib.source_remove(this._settleId);
+                this._settleId = 0;
+            }
+            this._hidden = this._shouldHide();
+        }
+        this._present(instant);
+        this._syncPointerPoll();
+    }
+
+    // Slides to where `_hidden` and `_fullscreen` put them.
+    _present(instant = false) {
+        const hide = this._hidden || this._fullscreen;
+        if (!hide) {
+            // Shown and held before the first frame that draws it. It is
+            // still off the top after a fullscreen slide-out, so nothing shows yet.
+            this._offscreen = false;
+            this._setShown(true);
+            this._syncHold();
+        } else if (this._offscreen) {
+            // Already off the screen (auto-hidden): nothing to slide.
+            this._finishHide();
+            return;
+        }
         this._slide(hide, () => {
             // Only a slide-out that ran to the end gets here (an interrupted
             // one never completes); released once nothing is left to draw.
-            if (this._hidden) {
-                this._offscreen = true;
-                this._syncHold();
-            }
-        });
+            if (this._hidden || this._fullscreen)
+                this._finishHide();
+        }, instant);
+    }
+
+    _finishHide() {
+        this._offscreen = true;
+        // For fullscreen, not drawn and no input either; auto-hide leaves
+        // them in place, off the top.
+        this._setShown(!this._fullscreen);
+        this._syncHold();
+    }
+
+    _setShown(shown) {
+        this._island.visible = shown;
+        for (const bubble of this._bubbles)
+            bubble.setFullscreenHidden(!shown);
     }
 
     // `done` runs once the island has finished moving (or at once without motion).
-    _slide(hide, done) {
+    _slide(hide, done, instant = false) {
         const spot = this._spot();
         const offset = hide ? -(spot.y + spot.height + 4 * scaleFactor()) : 0;
-        const animate = motionAllowed(this._settings);
+        const animate = !instant && motionAllowed(this._settings);
         for (const actor of this._actors()) {
             actor.remove_transition('translation-y');
             if (!animate) {
@@ -361,7 +461,8 @@ export class AutoHide {
     // Only while hidden: watch for the pointer pushed against the top edge
     // above the island (nothing is placed there, so no clicks are taken).
     _syncPointerPoll() {
-        if (this._hidden && !this._pollId) {
+        // Not in fullscreen: nothing may reveal them while it lasts.
+        if (this._hidden && !this._fullscreen && !this._pollId) {
             this._pollId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, POINTER_POLL_MS, () => {
                 if (this._pointerInZone(true)) {
                     this._pollId = 0;
@@ -374,7 +475,7 @@ export class AutoHide {
                 }
                 return GLib.SOURCE_CONTINUE;
             });
-        } else if (!this._hidden && this._pollId) {
+        } else if ((!this._hidden || this._fullscreen) && this._pollId) {
             GLib.source_remove(this._pollId);
             this._pollId = 0;
         }

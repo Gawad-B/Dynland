@@ -1,6 +1,7 @@
 // Hides GNOME's top bar and lends its indicators to the island. GNOME's
 // panel stays alive, so the shell and other extensions keep adding
-// indicators to Main.panel.statusArea as usual.
+// indicators to Main.panel.statusArea as usual. The slots are the island's
+// places, or in the "bar" layout the bar's (barStart, barStatus, barClock).
 
 import GLib from 'gi://GLib';
 import St from 'gi://St';
@@ -9,6 +10,8 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {splitIndicators} from './lib/layout.js';
 
+// Not `layout` or `bar-notch-pages`: a change there rebuilds the whole
+// extension (extension.js), bridge included; refresh() only reads them.
 const LAYOUT_KEYS = [
     'show-clock', 'show-quick-settings', 'show-activities',
     'show-tray-indicators', 'idle-indicators', 'home-indicators',
@@ -27,7 +30,11 @@ export class PanelBridge {
         this._wrapped = false;
     }
 
-    /** @param {(name: string) => St.Widget} slotFor the island or corner box for a layout slot */
+    /**
+     * @param {(name: string) => ?St.Widget} slotFor the island, corner or bar box
+     *   for a layout slot; null for a slot with no place (a bar slot without a
+     *   bar), whose indicators stay in the hidden panel
+     */
     enable(slotFor) {
         const panel = Main.panel;
         if (!panel?._leftBox || !panel._centerBox || !panel._rightBox ||
@@ -113,11 +120,18 @@ export class PanelBridge {
             homeIndicators: this._settings.get_strv('home-indicators'),
             // Quick Settings always lives at the end of the island's second page.
             cornerInIsland: true,
+            bar: this._settings.get_string('layout') === 'bar',
+            barNotchPages: this._settings.get_boolean('bar-notch-pages'),
         });
 
         for (const [slot, roles] of Object.entries(split)) {
+            if (!roles.length)
+                continue;
+            const box = this._slotFor(slot);
+            if (!box)
+                continue;
             for (const role of roles)
-                this._borrow(role, this._slotFor(slot));
+                this._borrow(role, box);
         }
     }
 

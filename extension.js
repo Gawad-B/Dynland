@@ -9,7 +9,9 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
+import {AppMenuButton} from './appMenu.js';
 import {AutoHide} from './autoHide.js';
+import {MenuBar} from './bar.js';
 import {Bubble} from './bubble.js';
 import {Corner, Island} from './island.js';
 import {PanelBridge} from './panelBridge.js';
@@ -53,7 +55,14 @@ export default class DynlandExtension extends Extension {
         this._settings = this.getSettings();
         this._activities = new Map();
 
+        this._arrangement = this._currentArrangement();
+        this._barLayout = this._arrangement !== 'island';
         this._bridge = new PanelBridge(this._settings);
+        if (this._barLayout) {
+            this._bar = new MenuBar(this._settings);
+            this._appMenu = new AppMenuButton();
+            this._bar.slot('barStart').insert_child_at_index(this._appMenu.container, 0);
+        }
         this._island = new Island(this._settings, {
             anyMenuOpen: () => this._bridge.anyMenuOpen(),
         });
@@ -80,12 +89,24 @@ export default class DynlandExtension extends Extension {
 
         // On the stage before indicators move in, so they never lay out off-stage.
         // The bubbles go on top: an opened card can reach over the corner pill.
-        // The corner and bubbles hide themselves, so they follow fullscreen on
-        // their own (GNOME's tracking would show them again).
-        Main.layoutManager.addChrome(this._island, {affectsStruts: false, trackFullscreen: true});
+        // The corner hides itself, so it follows fullscreen on its own (GNOME's
+        // tracking would show it again). The island and bubbles slide off the
+        // top for a fullscreen window (AutoHide); GNOME's tracking would hide
+        // the island in one frame before the slide.
+        // The bar goes first so the island and bubbles are stacked above it;
+        // it is the strut in bar layout.
+        if (this._bar)
+            Main.layoutManager.addChrome(this._bar, {affectsStruts: true, trackFullscreen: true});
+        Main.layoutManager.addChrome(this._island, {affectsStruts: false, trackFullscreen: false});
         for (const actor of [this._corner, ...this._bubbles])
             Main.layoutManager.addChrome(actor, {affectsStruts: false, trackFullscreen: false});
-        this._bridge.enable(name => name === 'corner' ? this._corner.slot() : this._island.slot(name));
+        this._bridge.enable(name => {
+            if (name === 'corner')
+                return this._corner.slot();
+            if (['barStart', 'barStatus', 'barClock'].includes(name))
+                return this._bar?.slot(name) ?? null;
+            return this._island.slot(name);
+        });
         this._autoHide = new AutoHide(this._settings, this._island, this._bubbles,
             () => this._bridge.anyMenuOpen());
         this._autoHide.enable();
@@ -100,6 +121,10 @@ export default class DynlandExtension extends Extension {
                 this._syncBare();
             },
             'changed::auto-hide', () => this._syncBare(), this);
+        // Each of these can change the whole arrangement: rebuild it if it did.
+        this._settings.connectObject(
+            'changed::layout', () => this._queueRebuild(),
+            'changed::bar-notch-pages', () => this._queueRebuild(), this);
         Main.layoutManager.connectObject('monitors-changed', () => this._updateStrut(), this);
         St.ThemeContext.get_for_stage(global.stage).connectObject(
             'notify::scale-factor', () => this._updateStrut(), this);
@@ -176,6 +201,15 @@ export default class DynlandExtension extends Extension {
             this._keybound = false;
         }
         this._settings?.disconnectObject(this);
+        // Torn down from here on: activities ending, indicators leaving
+        // their slots and the settings below no longer render or measure
+        // them (they leave the stage before they are destroyed).
+        for (const actor of [this._island, ...this._bubbles ?? []].filter(Boolean))
+            actor.retire();
+        if (this._rebuildId) {
+            GLib.source_remove(this._rebuildId);
+            this._rebuildId = 0;
+        }
         global.workspace_manager.disconnectObject(this);
         global.display.disconnectObject(this);
         global.stage.disconnectObject(this);
@@ -192,23 +226,40 @@ export default class DynlandExtension extends Extension {
         this._manager?.clear();
 
         // Off the stage first: a relayout queued while indicators leave would
-        // otherwise run on actors that are already gone.
-        const actors = [...this._bubbles ?? [], this._corner, this._island].filter(Boolean);
+        // otherwise run on actors that are already gone. Chrome sits in
+        // uiGroup, which has no layout of its own, so the stage keeps a list
+        // of chrome actors waiting for allocation, and removing one evidently
+        // does not take it off that list (every rebuild logged this): the next stage relayout (the first frame, or
+        // enable() measuring the new island) would allocate the removed,
+        // destroyed actor ("Spurious clutter_actor_allocate", St's "not in the
+        // stage"). So run the waiting layout now, while they are all still on
+        // the stage (reading an allocation that is due lays the stage out).
+        const actors = [...this._bubbles ?? [], this._corner, this._island, this._bar].filter(Boolean);
+        for (const actor of actors) {
+            if (actor.get_stage())
+                actor.get_allocation_box();
+        }
         for (const actor of actors) {
             if (actor.get_parent())
                 Main.layoutManager.removeChrome(actor);
         }
         // Return borrowed indicators BEFORE destroying the island and corner,
-        // or they would be destroyed with them.
+        // or they would be destroyed with them. The island is retired, so
+        // its slots emptying does not re-render it.
         try {
             this._bridge?.disable();
         } catch (e) {
             console.error('Dynland: error while returning the top bar', e);
         }
         this._removeStrut();
+        this._appMenu?.destroy();
         for (const actor of actors)
             actor.destroy();
 
+        this._appMenu = null;
+        this._bar = null;
+        this._barLayout = false;
+        this._arrangement = null;
         this._island = null;
         this._bubbles = null;
         this._corner = null;
@@ -284,9 +335,46 @@ export default class DynlandExtension extends Extension {
         this._manager.release(id);
     }
 
+    // What `layout` and `bar-notch-pages` together build: 'island' (the
+    // pages setting changes nothing there), 'bar' or 'bar+pages'.
+    _currentArrangement() {
+        if (this._settings.get_string('layout') !== 'bar')
+            return 'island';
+        return this._settings.get_boolean('bar-notch-pages') ? 'bar+pages' : 'bar';
+    }
+
+    // Rebuilds everything from an idle callback, never from the settings
+    // signal itself: disable() disconnects the handler that is running.
+    // Only when the arrangement really changed: a key set to what it
+    // already means (or changed and changed back) rebuilds nothing.
+    _queueRebuild() {
+        if (this._rebuildId || this._currentArrangement() === this._arrangement)
+            return;
+        this._rebuildId = GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+            this._rebuildId = 0;
+            // GNOME may have disabled the extension meanwhile.
+            if (!this._settings || this._currentArrangement() === this._arrangement)
+                return GLib.SOURCE_REMOVE;
+            this.disable();
+            try {
+                this.enable();
+            } catch (e) {
+                console.error('Dynland: could not rebuild after a layout change', e);
+            }
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
     // Windows reach under the island and it does not hide: closed, it is an
-    // empty pill that opens on hover.
+    // empty pill that opens on hover. In bar layout it is the bar's notch.
     _syncBare() {
+        if (this._barLayout) {
+            this._island.setBare(false);
+            this._island.setNotch(true);
+            // Opens only with pages, and only onto an indicator (Island._canExpand).
+            this._island.setExpandable(this._arrangement === 'bar+pages');
+            return;
+        }
         this._island.setBare(!this._settings.get_boolean('reserve-space') &&
             !this._settings.get_boolean('auto-hide'));
     }
@@ -294,7 +382,8 @@ export default class DynlandExtension extends Extension {
     _updateStrut() {
         this._removeStrut();
         const monitor = Main.layoutManager.primaryMonitor;
-        if (!this._settings.get_boolean('reserve-space') || !monitor)
+        // The bar is the strut in bar layout.
+        if (this._barLayout || !this._settings.get_boolean('reserve-space') || !monitor)
             return;
 
         // An invisible, non-reactive band: it only pushes maximised windows down.

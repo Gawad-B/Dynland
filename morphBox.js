@@ -28,19 +28,24 @@ export function motionAllowed(settings) {
     return !settings.get_boolean('reduce-motion') && St.Settings.get().enable_animations !== false;
 }
 
+/** True while a window is fullscreen on the primary monitor (and not in the overview). */
+export function inFullscreen() {
+    const monitor = Main.layoutManager.primaryMonitor;
+    return global.window_group.visible && !!monitor?.inFullscreen;
+}
+
 /**
  * Shows `actor` while `wanted()` is true, except over a fullscreen window.
  * GNOME's own fullscreen tracking (addChrome's trackFullscreen) would set
  * `visible` back to true on every fullscreen or overview change, showing an
- * actor that hid itself, so actors that hide use this instead.
+ * actor that hid itself, so actors that hide use this instead. (The island
+ * and bubbles slide out instead: AutoHide owns their fullscreen handling.)
  *
  * @returns {() => void} call after `wanted()` changes
  */
 export function followFullscreen(actor, wanted) {
     const sync = () => {
-        const monitor = Main.layoutManager.primaryMonitor;
-        const fullscreen = global.window_group.visible && !!monitor?.inFullscreen;
-        actor.visible = wanted() && !fullscreen;
+        actor.visible = wanted() && !inFullscreen();
     };
     // Connected after LayoutManager's handlers, so inFullscreen is already up to date.
     global.display.connectObject('in-fullscreen-changed', sync, actor);
@@ -91,11 +96,24 @@ class MorphBox extends St.BoxLayout {
         this._morphTarget = null;
         this._radius = null;
         this._radiusLaterId = 0;
+        // Off the stage nothing is rendered, measured or restyled (St logs a
+        // CRITICAL for a theme node read off the stage, and Clutter a spurious
+        // allocation); a render asked for meanwhile runs once it is on the
+        // stage. Retired (being torn down), nothing runs at all.
+        this._retired = false;
+        this._renderWanted = false;
 
         this.connect('notify::width', () => this._onWidthChanged());
         // Height changes arrive mid-layout; restyling there would force a
         // second layout in the same frame, so round the corners just before the next one.
         this.connect('notify::height', () => this._queueRadius());
+        this.connect('parent-set', () => {
+            if (!this._live())
+                return;
+            if (this._renderWanted)
+                this._render();
+            this._onStage();
+        });
         Main.layoutManager.connectObject('monitors-changed', () => this._reposition(), this);
         St.ThemeContext.get_for_stage(global.stage).connectObject(
             'notify::scale-factor', () => {
@@ -105,10 +123,33 @@ class MorphBox extends St.BoxLayout {
         followStyle(this, settings);
 
         this.connect('destroy', () => {
+            this._retired = true;
             this._token++;
             if (this._radiusLaterId)
                 global.compositor.get_laters().remove(this._radiusLaterId);
+            this._radiusLaterId = 0;
         });
+    }
+
+    /**
+     * Being torn down: from now on nothing renders, measures, restyles or
+     * moves it, whatever its slots or settings do until it is destroyed.
+     */
+    retire() {
+        this._retired = true;
+        this._token++;
+        this._pending = false;
+        this._renderWanted = false;
+    }
+
+    // On the stage and not being torn down: the only time it may be
+    // rendered, measured, restyled or moved.
+    _live() {
+        return !this._retired && !!this.get_stage();
+    }
+
+    /** Optional override: runs each time it arrives on the stage (after a waiting render). */
+    _onStage() {
     }
 
     // Content scales from the top centre while fading in.
@@ -158,10 +199,14 @@ class MorphBox extends St.BoxLayout {
     }
 
     _render() {
+        // Off the stage (being built) it renders once it arrives; retired, never.
+        if (!this._live()) {
+            this._renderWanted = !this._retired;
+            return;
+        }
+        this._renderWanted = false;
         const key = this._stateKey();
-        // Off the stage (being built or torn down) nothing may be measured.
-        const onStage = !!this.get_stage();
-        const animated = onStage && this._motionAllowed() && this.mapped && this.width > 0;
+        const animated = this._motionAllowed() && this.mapped && this.width > 0;
 
         if (!animated) {
             this._token++;
@@ -170,8 +215,7 @@ class MorphBox extends St.BoxLayout {
             this._stopMorph();
             this._resetContent();
             this._applyAndRecord();
-            if (onStage)
-                this._morph(false);
+            this._morph(false);
             return;
         }
 
@@ -236,7 +280,7 @@ class MorphBox extends St.BoxLayout {
 
     // Phase 2: swap the content, morph the shape, fade the new content in.
     _swapIn(token) {
-        if (token !== this._token)
+        if (token !== this._token || !this._live())
             return;
         this._pending = false;
         const carried = this._carryBefore();
@@ -389,7 +433,7 @@ class MorphBox extends St.BoxLayout {
     }
 
     _queueRadius() {
-        if (this._radiusLaterId)
+        if (this._radiusLaterId || !this._live())
             return;
         this._radiusLaterId = global.compositor.get_laters().add(Meta.LaterType.BEFORE_REDRAW, () => {
             this._radiusLaterId = 0;
@@ -399,6 +443,8 @@ class MorphBox extends St.BoxLayout {
     }
 
     _updateRadius() {
+        if (!this._live())
+            return;
         const r = Math.min(Math.round(this.height / scaleFactor() / 2), EXPANDED_RADIUS);
         if (r === this._radius)
             return;

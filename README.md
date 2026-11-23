@@ -40,6 +40,10 @@ instead of copying it, so edits apply on the next shell restart.
   dock is shown over a window, Dynland keeps the compositor drawing (as GNOME's menus
   do), since Mutter would otherwise put a window that fills the monitor straight onto the
   display and leave the island, the dock and menus invisible.
+- Preferences > Layout switches to "MacBook bar": a full-width translucent bar like the macOS
+  menu bar, with the notch in its middle, the focused app's name and menu on the left, and
+  status icons and the clock on the right. Windows start right below it. "Notch opens on
+  hover" chooses whether the notch still shows the indicator pages or stays empty.
 - The island lives on the primary monitor only.
 - Panel items that have no status-area role (rare) are hidden while Dynland is enabled.
 

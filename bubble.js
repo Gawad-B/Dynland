@@ -9,11 +9,13 @@ import GObject from 'gi://GObject';
 import Meta from 'gi://Meta';
 import St from 'gi://St';
 
-import {MorphBox, followFullscreen, scaleFactor} from './morphBox.js';
+import {BAR_HEIGHT} from './bar.js';
+import {MorphBox, scaleFactor} from './morphBox.js';
 
 const GAP = 8; // logical px between the island and the bubble
 // The island's empty pill (stylesheet .dynland-bare) is 80x24 with no padding;
-// the bubble keeps its 2px vertical padding, so its row is 20 high.
+// the bubble keeps its 2px vertical padding, so its row is 20 high. As the
+// menu bar's notch (.dynland-notch) the island is BAR_HEIGHT high instead.
 const BARE_WIDTH = 80;
 const BARE_HEIGHT = 24;
 const BARE_PADDING = 2;
@@ -50,8 +52,9 @@ export const Bubble = GObject.registerClass({
         this._activityExpanded = false;
         this._poppingOut = false;
         this._wanted = false; // shown, unless a fullscreen window hides it
+        this._fullscreenHidden = false; // AutoHide: slid out for fullscreen
         this._bare = false;
-        this._syncVisible = followFullscreen(this, () => this._wanted);
+        this._bareHeight = BARE_HEIGHT; // logical px, of the island's closed state
         this._errorSources = new Set();
 
         // The compact row is named 'panel' so it is exactly as tall as the island's rows.
@@ -88,6 +91,7 @@ export const Bubble = GObject.registerClass({
         this.connect('destroy', () => {
             if (this._followId)
                 global.compositor.get_laters().remove(this._followId);
+            this._followId = 0;
             for (const id of this._errorSources)
                 GLib.source_remove(id);
             this._errorSources.clear();
@@ -97,6 +101,16 @@ export const Bubble = GObject.registerClass({
     /** @type {?{id: string, content: object}} */
     get activity() {
         return this._activity;
+    }
+
+    /** AutoHide: true once slid off the top for a fullscreen window, false when it returns. */
+    setFullscreenHidden(hidden) {
+        this._fullscreenHidden = hidden;
+        this._syncVisible();
+    }
+
+    _syncVisible() {
+        this.visible = this._wanted && !this._fullscreenHidden;
     }
 
     /** @param {?{id: string, content: object}} current from ActivityManager */
@@ -163,7 +177,7 @@ export const Bubble = GObject.registerClass({
             this.set_scale(1, 1);
             this._render();
         };
-        if (!this.visible || !this.mapped || !this._motionAllowed()) {
+        if (this._retired || !this.visible || !this.mapped || !this._motionAllowed()) {
             clear();
             return;
         }
@@ -205,7 +219,7 @@ export const Bubble = GObject.registerClass({
     }
 
     _withIslandHeight([min, nat]) {
-        if (this._activityExpanded || !this._island.get_stage())
+        if (this._activityExpanded || !this._island._live())
             return [min, nat];
         const height = this._island.height;
         return [Math.max(min, height), Math.max(nat, height)];
@@ -244,14 +258,27 @@ export const Bubble = GObject.registerClass({
     // bubble takes the pill's size so the pair reads as one symmetric unit.
     // Set as geometry rather than a style class: a style change on the bubble
     // while the island morphs left it without an allocation for a frame.
+    // Off the stage (or with the island off it) nothing is measured or
+    // resized; it syncs on arriving (_onStage) and on the island's next change.
     _syncBare() {
-        const bare = this._island.has_style_class_name('dynland-bare') && !this._activityExpanded;
-        if (bare === this._bare)
+        if (!this._live() || !this._island._live())
+            return;
+        const notch = this._island.has_style_class_name('dynland-notch');
+        const bare = (notch || this._island.has_style_class_name('dynland-bare')) && !this._activityExpanded;
+        const height = notch ? BAR_HEIGHT : BARE_HEIGHT;
+        if (bare === this._bare && (!bare || height === this._bareHeight))
             return;
         this._bare = bare;
+        this._bareHeight = height;
         // The compact row otherwise keeps GNOME's panel height; the width is
         // clamped in the size requests below, which the morph reads.
-        this._compactBin.height = bare ? (BARE_HEIGHT - 2 * BARE_PADDING) * scaleFactor() : -1;
+        this._compactBin.height = bare ? (height - 2 * BARE_PADDING) * scaleFactor() : -1;
+    }
+
+    // Whatever the island did while this was off the stage, catch up.
+    _onStage() {
+        this._syncBare();
+        this._queueFollow();
     }
 
     vfunc_get_preferred_width(forHeight) {
@@ -283,10 +310,12 @@ export const Bubble = GObject.registerClass({
 
     // Moves beside the island, and (compact) takes its height, before the next frame.
     _queueFollow() {
-        if (this._followId)
+        if (this._followId || !this._live())
             return;
         this._followId = global.compositor.get_laters().add(Meta.LaterType.BEFORE_REDRAW, () => {
             this._followId = 0;
+            if (!this._live())
+                return GLib.SOURCE_REMOVE;
             this._reposition();
             if (!this._activityExpanded)
                 this.queue_relayout();
@@ -296,10 +325,10 @@ export const Bubble = GObject.registerClass({
 
     _reposition() {
         const island = this._island;
-        if (!this.get_stage() || !island.get_stage())
+        if (!this._live() || !island._live())
             return;
         const previous = this._previous;
-        const anchor = previous?.visible ? previous : island;
+        const anchor = previous?.visible && previous._live() ? previous : island;
         // Where the anchor is heading, not where it is mid-slide; the island's
         // `x` is 0 while it awaits allocation, so ask where it is drawn.
         const anchorX = anchor._slideTo ?? (anchor === island ? island.drawnX : anchor.x);

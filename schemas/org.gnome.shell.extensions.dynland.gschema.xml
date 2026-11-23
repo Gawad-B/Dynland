@@ -59,6 +59,18 @@
     </key>
 
     <!-- Appearance and behaviour -->
+    <key name="layout" type="s">
+      <choices>
+        <choice value="island"/>
+        <choice value="bar"/>
+      </choices>
+      <default>'island'</default>
+      <summary>Layout: a floating notch (island) or a macOS-like bar with the notch in its middle (bar)</summary>
+    </key>
+    <key name="bar-notch-pages" type="b">
+      <default>false</default>
+      <summary>In the bar layout, the notch still opens on hover with pages of indicators</summary>
+    </key>
     <key name="reserve-space" type="b">
       <default>true</default>
       <summary>Keep maximised windows below the island</summary>

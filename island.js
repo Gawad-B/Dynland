@@ -36,6 +36,8 @@ class Island extends MorphBox {
         this._page = HOME;
         this._compact = false;
         this._bare = false; // closed: an empty pill that opens on hover
+        this._notch = false; // closed: the menu bar's notch, empty like bare but bar-high
+        this._expandable = true; // false: never opens (a notch with no pages)
         this._hoverTimeoutId = 0;
         this._scrollCooldownId = 0;
         this._gestureTimeoutId = 0;
@@ -90,8 +92,8 @@ class Island extends MorphBox {
         // an empty slot is hidden so the row adds no spacing for it.
         for (const slot of Object.values(this._slots)) {
             slot.connectObject(
-                'child-added', () => this._render(),
-                'child-removed', () => this._render(), this);
+                'child-added', () => this._onSlotChanged(),
+                'child-removed', () => this._onSlotChanged(), this);
         }
 
         // TARGET phase: only clicks on the pill's empty space (not on an
@@ -122,7 +124,7 @@ class Island extends MorphBox {
     }
 
     setExpanded(expanded) {
-        if (this._expanded === expanded)
+        if (this._expanded === expanded || (expanded && !this._canExpand()))
             return;
         this._expanded = expanded;
         this._page = HOME;
@@ -143,6 +145,47 @@ class Island extends MorphBox {
             return;
         this._bare = bare;
         this._render();
+    }
+
+    /** Closed, be the menu bar's notch: empty, flush with the top, as tall as the bar. */
+    setNotch(notch) {
+        if (this._notch === notch)
+            return;
+        this._notch = notch;
+        this._render();
+    }
+
+    /** False: hover, clicks and the keybinding never open the island (closes it if open). */
+    setExpandable(expandable) {
+        if (this._expandable === expandable)
+            return;
+        this._expandable = expandable;
+        if (!expandable)
+            this.setExpanded(false);
+    }
+
+    // The notch opens only onto its pages: with no indicator in either, it
+    // stays the empty notch.
+    _canExpand() {
+        if (!this._expandable)
+            return false;
+        if (!this._notch)
+            return true;
+        return [this._slots.home, this._slots.more].some(slot => slot.get_children().some(c => c.visible));
+    }
+
+    _onSlotChanged() {
+        // The notch's last page indicator left while it was open: close it.
+        if (this._expanded && !this._canExpand()) {
+            this._expanded = false;
+            this._page = HOME;
+        }
+        this._render();
+    }
+
+    // Closed with nothing to show: the empty pill or the notch.
+    _isEmptyClosed() {
+        return this._bare || this._notch;
     }
 
     setCompact(compact) {
@@ -374,13 +417,13 @@ class Island extends MorphBox {
 
     _stateKey() {
         if (!this._expanded)
-            return this._bare ? 'bare' : this._compact ? 'compact' : 'idle';
+            return this._isEmptyClosed() ? 'bare' : this._compact ? 'compact' : 'idle';
         return this._onMorePage() ? 'more' : 'home';
     }
 
     _applyContent() {
         const more = this._onMorePage();
-        const bare = this._bare && !this._expanded;
+        const bare = this._isEmptyClosed() && !this._expanded;
         const filled = slot => slot.get_n_children() > 0;
         this._homeRow.visible = !more && !bare;
         this._slots.left.visible = filled(this._slots.left);
@@ -393,7 +436,10 @@ class Island extends MorphBox {
             dot.checked = page === (more ? MORE : HOME);
         });
         this._setStyleClass('dynland-expanded', this._expanded);
-        this._setStyleClass('dynland-bare', bare);
+        this._setStyleClass('dynland-bare', bare && !this._notch);
+        this._setStyleClass('dynland-notch', bare && this._notch);
+        // Opened, the notch is never narrower than when closed (stylesheet).
+        this._setStyleClass('dynland-notch-open', this._expanded && this._notch);
     }
 
     // Only the top edge is set here (x is centred in vfunc_allocate), and only
@@ -406,16 +452,19 @@ class Island extends MorphBox {
     // Where the island's left edge is drawn. Its `x` reads as 0 while a
     // relayout is pending (the fixed position; it centres itself in
     // vfunc_allocate), so answer from the allocation or the same centring.
+    // Off the stage it cannot be measured: then it is not drawn anywhere.
     get drawnX() {
         if (this.has_allocation())
             return this.get_allocation_box().x1;
         const monitor = Main.layoutManager.primaryMonitor;
-        return monitor ? Math.floor(monitor.x + (monitor.width - this.width) / 2) : this.x;
+        if (!monitor || !this._live())
+            return this.x;
+        return Math.floor(monitor.x + (monitor.width - this.width) / 2);
     }
 
     _reposition() {
         const monitor = Main.layoutManager.primaryMonitor;
-        if (!monitor || !this.get_stage())
+        if (!monitor || !this._live())
             return;
         const y = monitor.y + TOP_MARGIN * scaleFactor();
         if (this._fixedY !== y) {

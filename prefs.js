@@ -13,6 +13,7 @@ const PRAYER_TIMES_SCHEMA = 'org.gnome.shell.extensions.prayer-times';
 const JUST_PERFECTION_UUID = 'just-perfection-desktop@just-perfection';
 const JUST_PERFECTION_SCHEMA = 'org.gnome.shell.extensions.just-perfection';
 const STYLES = ['solid', 'blur'];
+const LAYOUTS = ['island', 'bar'];
 
 function switchRow(settings, key, title, subtitle = '') {
     const row = new Adw.SwitchRow({title, subtitle});
@@ -76,13 +77,33 @@ export default class DynlandPreferences extends ExtensionPreferences {
         });
         style.connect('notify::selected', () => settings.set_string('style', STYLES[style.selected]));
 
+        const layout = new Adw.ComboRow({
+            title: 'Layout',
+            subtitle: 'MacBook bar: a full-width bar with the notch in its middle; windows start below it',
+            model: Gtk.StringList.new(['Island', 'MacBook bar']),
+            selected: Math.max(0, LAYOUTS.indexOf(settings.get_string('layout'))),
+        });
+        layout.connect('notify::selected', () => settings.set_string('layout', LAYOUTS[layout.selected]));
+
+        const barNotchPages = switchRow(settings, 'bar-notch-pages', 'Notch opens on hover',
+            'In the MacBook bar layout, hovering the notch shows the indicator pages; off, the notch stays empty and only grows for live activities');
+        const reserveSpace = switchRow(settings, 'reserve-space', 'Keep windows below the island', 'Maximised windows start under the island. When off, windows reach under it and the option below applies');
         const autoHide = switchRow(settings, 'auto-hide', 'Hide while a window covers the island',
             'Like Dash to Dock: push the pointer to the top edge to bring it back. When off, the island stays as an empty black pill that opens on hover');
-        settings.bind('reserve-space', autoHide, 'sensitive',
-            Gio.SettingsBindFlags.GET | Gio.SettingsBindFlags.INVERT_BOOLEAN);
+        const syncSensitivity = () => {
+            const isBar = settings.get_string('layout') === 'bar';
+            barNotchPages.sensitive = isBar;
+            reserveSpace.sensitive = !isBar;
+            autoHide.sensitive = !isBar && !settings.get_boolean('reserve-space');
+        };
+        settings.connect('changed::layout', syncSensitivity);
+        settings.connect('changed::reserve-space', syncSensitivity);
+        syncSensitivity();
         page.add(group('Appearance', [
+            layout,
+            barNotchPages,
             style,
-            switchRow(settings, 'reserve-space', 'Keep windows below the island', 'Maximised windows start under the island. When off, windows reach under it and the option below applies'),
+            reserveSpace,
             autoHide,
         ]));
         return page;
