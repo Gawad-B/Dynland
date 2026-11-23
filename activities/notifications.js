@@ -181,6 +181,8 @@ export class NotificationsActivity {
                 text = text.replace(/<[^>]*>/g, '');
             }
         }
+        // A preview, not the message: one paragraph, cut to one line by the label.
+        text = text.replace(/\s*\n\s*/g, ' ').trim();
         return text.length > MAX_BODY_CHARS ? `${text.slice(0, MAX_BODY_CHARS)}…` : text;
     }
 
@@ -223,7 +225,10 @@ export class NotificationsActivity {
             text: this._bodyText(notification),
             style_class: 'dynland-notification-body',
         });
-        body.clutter_text.line_wrap = true;
+        // One line, ending in an ellipsis: a card that grows with the
+        // message covers the window under it.
+        body.clutter_text.line_wrap = false;
+        body.clutter_text.ellipsize = Pango.EllipsizeMode.END;
         text.add_child(body);
         header.add_child(text);
 

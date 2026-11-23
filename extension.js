@@ -360,23 +360,22 @@ export default class DynlandExtension extends Extension {
         this._island.setCompact(shown.length > 1);
     }
 
-    // Bar layout: the notch holds one long-lived activity (NOTCH_ACTIVITIES:
-    // media, the prayer countdown), a dropdown under the bar a second. A
-    // transient activity (notification, OSD, power) is never put in the notch,
-    // however free it is: it takes the dropdown. `active` lists the most
-    // important first (priority, newest among equals), so a free notch takes
-    // the most important waiting long-lived activity, and a free dropdown the
-    // most important of the rest (a second long-lived one included).
+    // Bar layout: the notch holds one activity, a dropdown under the bar a
+    // second. Long-lived activities (NOTCH_ACTIVITIES: media, the prayer
+    // countdown) belong in the notch; a transient one (notification, OSD,
+    // power) is shown in the notch too while nothing else is there, and drops
+    // down under the bar when the notch is taken. `active` lists the most
+    // important first (priority, newest among equals). When a long-lived and
+    // a transient activity arrive together, the long-lived one gets the notch.
     //
     // The rule: an activity keeps the place it was first shown in for its
     // whole life in the manager's active list (this._barPlaces). Nothing moves
-    // between the notch and the dropdown, and the dropdown stays a dropdown
-    // when the notch's activity ends. The one exception to "it stays shown":
+    // between the notch and the dropdown. Two exceptions to "it stays shown":
     // a transient activity that waits displaces a long-lived one sitting in
-    // the dropdown, which then waits (it is never shown in two places) and
-    // returns to the dropdown when it is free again, never to the notch; a
-    // free notch is only for a long-lived activity not shown yet. So an
-    // event never hides behind a countdown. Anything else waits for its place.
+    // the dropdown, which then waits and returns to the dropdown when it is
+    // free again; and a long-lived activity that starts while a transient
+    // one holds the notch waits for the notch (transients are short) instead
+    // of settling in the dropdown for good.
     _placeInBar(active) {
         const [notch, dropdown] = this._bubbles;
         const places = this._barPlaces;
@@ -392,25 +391,37 @@ export default class DynlandExtension extends Extension {
             else if (activity.content !== bubble.activity.content)
                 bubble.setActivity(activity);
         }
+        const longLivedId = id => NOTCH_ACTIVITIES.has(id);
         const waitingNow = () => active.filter(a => !this._bubbles.some(b => b.activity?.id === a.id));
         let arrived = false;
         const show = (bubble, activity, place) => {
+            // A short event in the notch opens its card by itself, like a
+            // phone's island; media and the countdown open on hover.
+            if (bubble === notch)
+                notch.setAutoOpen(!longLivedId(activity.id));
             bubble.setActivity(activity);
             places.set(activity.id, place);
             arrived = true;
         };
-        if (dropdown.activity && NOTCH_ACTIVITIES.has(dropdown.activity.id)) {
-            const transient = waitingNow().find(a => !NOTCH_ACTIVITIES.has(a.id));
+        // The notch: a long-lived activity first (never one first shown in
+        // the dropdown), else a transient one not shown yet.
+        if (!notch.activity) {
+            const forNotch =
+                waitingNow().find(a => longLivedId(a.id) && places.get(a.id) !== 'dropdown') ??
+                waitingNow().find(a => !longLivedId(a.id) && !places.has(a.id));
+            if (forNotch)
+                show(notch, forNotch, 'notch');
+        }
+        if (dropdown.activity && longLivedId(dropdown.activity.id)) {
+            const transient = waitingNow().find(a => !longLivedId(a.id) && places.get(a.id) !== 'notch');
             if (transient)
                 show(dropdown, transient, 'dropdown');
         }
-        // Never one first shown in the dropdown.
-        const longLived = waitingNow().find(a =>
-            NOTCH_ACTIVITIES.has(a.id) && places.get(a.id) !== 'dropdown');
-        if (!notch.activity && longLived)
-            show(notch, longLived, 'notch');
-        // Never one first shown in the notch (it only leaves the notch by ending).
-        const next = waitingNow().find(a => places.get(a.id) !== 'notch');
+        // Never one first shown in the notch (it only leaves the notch by
+        // ending); a new long-lived one waits for a notch held by a transient.
+        const notchIsTransient = notch.activity && !longLivedId(notch.activity.id);
+        const next = waitingNow().find(a => places.get(a.id) !== 'notch' &&
+            !(notchIsTransient && longLivedId(a.id) && !places.has(a.id)));
         if (!dropdown.activity && next)
             show(dropdown, next, 'dropdown');
         if (arrived)

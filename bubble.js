@@ -72,6 +72,7 @@ export const Bubble = GObject.registerClass({
         this._anchor = null;
         this._slideTo = null; // x the bubble is sliding to, null when still
         this._heldId = null;
+        this._autoOpen = false;
         this._onActivityError = onActivityError;
         this._activity = null;
         this._activityExpanded = false;
@@ -167,14 +168,17 @@ export const Bubble = GObject.registerClass({
     /** @param {?{id: string, content: object}} current from ActivityManager */
     setActivity(current) {
         const wasShown = !!this._activity;
+        if (!current)
+            this._autoOpen = false;
         if (this._heldId && this._heldId !== current?.id) {
             this.emit('activity-hover', this._heldId, false);
             this._heldId = null;
         }
         this._activity = current;
-        // A dropdown always shows its card when it has one.
+        // A dropdown always shows its card when it has one, and so does a
+        // notch told to open by itself (setAutoOpen).
         this._activityExpanded = !!current && !!current.content.expanded &&
-            (this._placement === 'dropdown' || this.hover);
+            (this._placement === 'dropdown' || this._autoOpen || this.hover);
 
         if (!current) {
             this._popOut();
@@ -185,7 +189,7 @@ export const Bubble = GObject.registerClass({
         if (!wasShown || !this._wanted || this._poppingOut)
             this._popIn();
         // A new activity that opens under the pointer is held open like a hovered one.
-        if ((this._placement === 'dropdown' ? this.hover : this._activityExpanded) && !this._heldId) {
+        if ((this._opensItself() ? this.hover : this._activityExpanded) && !this._heldId) {
             this._heldId = current.id;
             this.emit('activity-hover', current.id, true);
         }
@@ -267,8 +271,22 @@ export const Bubble = GObject.registerClass({
         this._render();
     }
 
+    // True when the card is open without the pointer: hovering then only
+    // holds the activity, it does not open and close the card.
+    _opensItself() {
+        return this._placement === 'dropdown' || (this._autoOpen && this._activityExpanded);
+    }
+
+    /**
+     * Notch: whether the next activity opens its card by itself (a short
+     * event such as a notification) instead of waiting for the pointer.
+     */
+    setAutoOpen(open) {
+        this._autoOpen = !!open;
+    }
+
     _onHover() {
-        if (this._placement === 'dropdown')
+        if (this._opensItself())
             this._setHeld(this.hover);
         else
             this._setActivityExpanded(this.hover);
