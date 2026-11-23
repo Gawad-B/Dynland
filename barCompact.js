@@ -579,7 +579,37 @@ export class QuickSettingsCondenser {
             if (source && children.includes(source))
                 return source;
         }
+        // Not one of GNOME's own: an indicator another extension added to
+        // Quick Settings (Caffeine, ...), found by its class name.
+        if (!(name in QUICK_INDICATOR_FIELDS) && name.length >= 3) {
+            const wanted = name.toLowerCase();
+            return children.find(child => !this._ours.has(child) &&
+                Array.isArray(child.quickSettingsItems) &&
+                child.constructor.name.toLowerCase().includes(wanted)) ?? null;
+        }
         return null;
+    }
+
+    // What an item shows: the indicator's own icons while it shows any, else
+    // the icon of its toggle. GNOME hides some indicators most of the time
+    // (Bluetooth with nothing connected), but an item the user put on the
+    // bar stays there as long as the feature exists.
+    _iconsFor(entry) {
+        const icons = entry.source.get_children().filter(c => c instanceof St.Icon);
+        for (const icon of icons)
+            this._watchActor(icon, 'notify::visible', 'notify::icon-name', 'notify::gicon');
+        if (this._hold.wants(entry.source) && icons.some(icon => icon.visible))
+            return icons;
+        // Only a real toggle stands in (the system row is not one: the
+        // battery item shows the battery icon or nothing).
+        for (const toggle of entry.source.quickSettingsItems ?? []) {
+            if (!toggle || !('checked' in toggle))
+                continue;
+            this._watchActor(toggle, 'notify::visible', 'notify::icon-name', 'notify::gicon');
+            if (toggle.visible && (toggle.icon_name || toggle.gicon))
+                return [toggle];
+        }
+        return [];
     }
 
     // Creates the items whose indicator now exists, mirrors every indicator's
@@ -608,7 +638,7 @@ export class QuickSettingsCondenser {
         }
 
         for (const entry of this._entries) {
-            const icons = entry.source.get_children().filter(c => c instanceof St.Icon);
+            const icons = this._iconsFor(entry);
             while (entry.mirrors.length < icons.length) {
                 const mirror = new St.Icon({
                     icon_size: BAR_ICON_SIZE,
@@ -621,7 +651,6 @@ export class QuickSettingsCondenser {
             while (entry.mirrors.length > icons.length)
                 entry.mirrors.pop().destroy();
             icons.forEach((icon, i) => {
-                this._watchActor(icon, 'notify::visible', 'notify::icon-name', 'notify::gicon');
                 const mirror = entry.mirrors[i];
                 if (icon.icon_name)
                     mirror.icon_name = icon.icon_name;
@@ -629,7 +658,7 @@ export class QuickSettingsCondenser {
                     mirror.gicon = icon.gicon;
                 mirror.visible = icon.visible;
             });
-            entry.item.visible = this._hold.wants(entry.source) && icons.some(icon => icon.visible);
+            entry.item.visible = icons.some(icon => icon.visible);
         }
 
         // Items first (in the settings' order), the control icon last.

@@ -91,14 +91,14 @@ export default class DynlandPreferences extends ExtensionPreferences {
         const autoHide = switchRow(settings, 'auto-hide', 'Hide while a window covers the island',
             'Like Dash to Dock: push the pointer to the top edge to bring it back. When off, the island stays as an empty black pill that opens on hover');
         const barQuick = listRow(settings, 'bar-quick-indicators', 'Quick Settings items on the bar (comma-separated)');
-        barQuick.tooltip_text = 'Accepted names: network, bluetooth, volume, microphone, battery, nightlight, rfkill, location, camera';
+        barQuick.tooltip_text = 'Accepted names: network, bluetooth, volume, microphone, battery, nightlight, rfkill, location, camera, or part of the name of an item another extension adds (caffeine)';
         const barGroup = group('MacBook bar', [
             listRow(settings, 'bar-start-indicators', 'Left side (comma-separated)'),
             listRow(settings, 'bar-status-order', 'Right side order (comma-separated)'),
             barQuick,
             listRow(settings, 'bar-icon-only', 'Icon only (comma-separated)'),
         ], 'Role names as in Indicator placement; these apply to the MacBook bar layout only. ' +
-            'Quick Settings items: network, bluetooth, volume, microphone, battery, nightlight, rfkill, location, camera. ' +
+            'Quick Settings items: network, bluetooth, volume, microphone, battery, nightlight, rfkill, location, camera, or an extension item such as caffeine. ' +
             'You can also hold Super and drag items on the bar to rearrange them.');
         const syncSensitivity = () => {
             const isBar = settings.get_string('layout') === 'bar';
