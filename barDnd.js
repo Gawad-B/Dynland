@@ -70,7 +70,7 @@ export class BarDnd {
             !(event.get_state() & SUPER_MASK))
             return Clutter.EVENT_PROPAGATE;
 
-        const unit = this._unitAt(event.get_source());
+        const unit = this._unitAt(global.stage.get_event_actor(event));
         if (!unit)
             return Clutter.EVENT_PROPAGATE;
 
