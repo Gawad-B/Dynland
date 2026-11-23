@@ -96,6 +96,7 @@ class MorphBox extends St.BoxLayout {
         this._morphTarget = null;
         this._radius = null;
         this._radiusLaterId = 0;
+        this._scaleLaterId = 0;
         // Off the stage nothing is rendered, measured or restyled (St logs a
         // CRITICAL for a theme node read off the stage, and Clutter a spurious
         // allocation); a render asked for meanwhile runs once it is on the
@@ -116,10 +117,7 @@ class MorphBox extends St.BoxLayout {
         });
         Main.layoutManager.connectObject('monitors-changed', () => this._reposition(), this);
         St.ThemeContext.get_for_stage(global.stage).connectObject(
-            'notify::scale-factor', () => {
-                this._reposition();
-                this._updateRadius();
-            }, this);
+            'notify::scale-factor', () => this._queueScaleSync(), this);
         followStyle(this, settings);
 
         this.connect('destroy', () => {
@@ -128,6 +126,7 @@ class MorphBox extends St.BoxLayout {
             if (this._radiusLaterId)
                 global.compositor.get_laters().remove(this._radiusLaterId);
             this._radiusLaterId = 0;
+            this._removeScaleLater();
         });
     }
 
@@ -140,6 +139,7 @@ class MorphBox extends St.BoxLayout {
         this._token++;
         this._pending = false;
         this._renderWanted = false;
+        this._removeScaleLater();
     }
 
     // On the stage and not being torn down: the only time it may be
@@ -430,6 +430,45 @@ class MorphBox extends St.BoxLayout {
                 this.set_size(-1, -1);
             },
         });
+    }
+
+    _removeScaleLater() {
+        if (this._scaleLaterId)
+            global.compositor.get_laters().remove(this._scaleLaterId);
+        this._scaleLaterId = 0;
+    }
+
+    // The theme scale changed: everything sized or cached from scaleFactor()
+    // is recomputed once, just before the next frame (never from the signal,
+    // which may arrive mid-layout; repeated changes coalesce into one step).
+    _queueScaleSync() {
+        if (this._scaleLaterId || !this._live())
+            return;
+        this._scaleLaterId = global.compositor.get_laters().add(Meta.LaterType.BEFORE_REDRAW, () => {
+            this._scaleLaterId = 0;
+            this._syncScale();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _syncScale() {
+        if (!this._live())
+            return;
+        // A running morph or a pinned size is in the old scale's pixels (a
+        // pending fade-out pins its size too, and morphs on its own after).
+        if (!this._pending) {
+            this._stopMorph();
+            this.set_size(-1, -1);
+        }
+        this._radius = null;
+        this._onScale();
+        this._reposition();
+        this._updateRadius();
+        this.queue_relayout();
+    }
+
+    /** Optional override: re-derive what was sized from scaleFactor() (see _syncScale). */
+    _onScale() {
     }
 
     _queueRadius() {

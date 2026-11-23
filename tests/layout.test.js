@@ -1,5 +1,5 @@
 import {test, assertEqual} from './harness.js';
-import {matchesRole, splitIndicators} from '../lib/layout.js';
+import {matchesRole, mergeBarLists, splitIndicators} from '../lib/layout.js';
 
 const PANEL = {
     left: ['activities', 'apps-menu'],
@@ -160,11 +160,24 @@ test('bar start: wildcard matches every tray icon', () => {
     assertEqual(r.barStart, ['activities', 'appindicator-2', 'appindicator-1']);
 });
 
-test('bar start: corner roles, dateMenu and activities never move', () => {
-    const r = splitIndicators(PANEL, {...BAR, barStartIndicators: ['quickSettings', 'screenSharing', 'dateMenu', 'activities']});
+test('bar start: dateMenu and activities never move', () => {
+    const r = splitIndicators(PANEL, {...BAR, barStartIndicators: ['dateMenu', 'activities']});
     assertEqual(r.barStart, ['activities']);
     assertEqual(r.barClock, ['dateMenu']);
     assertEqual(r.barStatus.slice(-2), ['screenSharing', 'quickSettings']);
+});
+
+test('bar start: corner roles move to the start side too, in list order', () => {
+    for (const barNotchPages of [false, true]) {
+        const r = splitIndicators(PANEL, {...BAR, barNotchPages, barStartIndicators: ['quickSettings', 'screenSharing']});
+        assertEqual(r.barStart, ['activities', 'quickSettings', 'screenSharing']);
+        assertEqual(r.barStatus.includes('quickSettings') || r.barStatus.includes('screenSharing'), false);
+    }
+});
+
+test('bar start: corner roles stay off with showQuickSettings off', () => {
+    const r = splitIndicators(PANEL, {...BAR, showQuickSettings: false, barStartIndicators: ['quickSettings']});
+    assertEqual(r.barStart, ['activities']);
 });
 
 test('bar start: showTrayIndicators off drops tray roles but keeps idle ones', () => {
@@ -174,4 +187,183 @@ test('bar start: showTrayIndicators off drops tray roles but keeps idle ones', (
 
 test('bar start: ignored when bar is false', () => {
     assertEqual(splitIndicators(PANEL, {...DEFAULTS, barStartIndicators: START}), splitIndicators(PANEL, DEFAULTS));
+});
+
+test('bar status order: exact names come first, in list order', () => {
+    const r = splitIndicators(PANEL, {...BAR, barStatusOrder: ['prayer-times', 'vitalsMenu']});
+    assertEqual(r.barStatus, [
+        'prayer-times', 'vitalsMenu',
+        'apps-menu', 'keyboard', 'clipboardIndicator', 'appindicator-2', 'appindicator-1',
+        'screenSharing', 'quickSettings',
+    ]);
+});
+
+test('bar status order: wildcard matches several roles, stable among them', () => {
+    const r = splitIndicators(PANEL, {...BAR, barStatusOrder: ['appindicator-*', 'apps-menu']});
+    assertEqual(r.barStatus.slice(0, 3), ['appindicator-2', 'appindicator-1', 'apps-menu']);
+});
+
+test('bar status order: unlisted roles keep their relative order after listed ones', () => {
+    const base = splitIndicators(PANEL, BAR).barStatus;
+    const r = splitIndicators(PANEL, {...BAR, barStatusOrder: ['keyboard']}).barStatus;
+    assertEqual(r[0], 'keyboard');
+    assertEqual(r.slice(1), base.filter(x => x !== 'keyboard'));
+});
+
+test('bar status order: unknown names are ignored', () => {
+    assertEqual(splitIndicators(PANEL, {...BAR, barStatusOrder: ['nope', 'also-nope-*']}),
+        splitIndicators(PANEL, BAR));
+});
+
+test('bar status order: corner roles can be reordered too', () => {
+    const r = splitIndicators(PANEL, {...BAR, barStatusOrder: ['quickSettings', 'screenSharing']});
+    assertEqual(r.barStatus.slice(0, 2), ['quickSettings', 'screenSharing']);
+});
+
+test('bar status order: ignored when bar is false', () => {
+    assertEqual(splitIndicators(PANEL, {...DEFAULTS, barStatusOrder: ['keyboard']}), splitIndicators(PANEL, DEFAULTS));
+});
+
+test('bar status order: works with notch pages', () => {
+    const r = splitIndicators(PANEL, {...BAR, barNotchPages: true, barStatusOrder: ['quickSettings', 'prayer-times']});
+    assertEqual(r.barStatus, ['quickSettings', 'prayer-times', 'screenSharing']);
+});
+
+test('bar status order with notch pages: a listed page role sits on the bar instead', () => {
+    const r = splitIndicators(PANEL, {...BAR, barNotchPages: true, barStatusOrder: ['quickSettings', 'keyboard', 'vitalsMenu']});
+    assertEqual(r.barStatus, ['quickSettings', 'keyboard', 'vitalsMenu', 'prayer-times', 'screenSharing']);
+    assertEqual(r.home, ['clipboardIndicator', 'appindicator-2', 'appindicator-1']);
+    assertEqual(r.more, ['apps-menu']);
+});
+
+test('bar status order with notch pages: a wildcard takes every match off the pages', () => {
+    const r = splitIndicators(PANEL, {...BAR, barNotchPages: true, barStatusOrder: ['appindicator-*']});
+    assertEqual(r.home, ['keyboard', 'clipboardIndicator']);
+    assertEqual(r.barStatus, ['appindicator-2', 'appindicator-1', 'prayer-times', 'screenSharing', 'quickSettings']);
+});
+
+test('bar status order with notch pages: unlisted page roles keep more-then-home order', () => {
+    const r = splitIndicators(PANEL, {...BAR, barNotchPages: true, barStatusOrder: ['keyboard', 'apps-menu', 'nope']});
+    assertEqual(r.barStatus.slice(0, 2), ['keyboard', 'apps-menu']);
+});
+
+test('bar status order with notch pages: bar start wins', () => {
+    const r = splitIndicators(PANEL, {...BAR, barNotchPages: true, barStartIndicators: ['keyboard'], barStatusOrder: ['keyboard']});
+    assertEqual(r.barStart, ['activities', 'keyboard']);
+    assertEqual(r.barStatus.includes('keyboard'), false);
+});
+
+// ---- drag and drop merging (mergeBarLists) ----
+
+// What the bar shows for `lists`: the role units on each side, as BarDnd reads them.
+const barSides = (prefs, lists) => {
+    const r = splitIndicators(PANEL, {...BAR, ...prefs, barStartIndicators: lists.start, barStatusOrder: lists.status});
+    return {start: r.barStart.filter(x => x !== 'activities'), status: r.barStatus};
+};
+// Moves `role` to index `k` of side `to` (the other roles keep their order).
+const moved = (sides, role, to, k) => {
+    const out = {start: sides.start.filter(x => x !== role), status: sides.status.filter(x => x !== role)};
+    out[to].splice(k, 0, role);
+    return out;
+};
+// Drops and checks the bar then shows exactly what was dropped.
+const drop = (prefs, lists, role, to, k) => {
+    const before = barSides(prefs, lists);
+    const after = moved(before, role, to, k);
+    const merged = mergeBarLists(lists, before, after, role);
+    assertEqual(barSides(prefs, merged), after);
+    return merged;
+};
+
+test('merge: a drop within the status side lists the dragged role, keeps the rest', () => {
+    const lists = {start: [], status: ['nope', 'prayer-times']};
+    const merged = drop({}, lists, 'quickSettings', 'status', 0);
+    assertEqual(merged.start, []);
+    // 'nope' matches nothing and stays first; quickSettings leads the roles.
+    assertEqual(merged.status.slice(0, 2), ['nope', 'quickSettings']);
+});
+
+test('merge: entries matching nothing on the bar stay where they were', () => {
+    const lists = {start: ['vitalsMenu', 'gone-a', 'keyboard', 'gone-*'], status: ['gone-b', 'prayer-times']};
+    const merged = drop({}, lists, 'apps-menu', 'start', 1);
+    assertEqual(merged.start, ['vitalsMenu', 'gone-a', 'apps-menu', 'keyboard', 'gone-*']);
+    assertEqual(merged.status, ['gone-b', 'prayer-times']);
+});
+
+test('merge: an unrelated wildcard stays a wildcard', () => {
+    const lists = {start: ['appindicator-*', 'keyboard'], status: []};
+    const merged = drop({}, lists, 'vitalsMenu', 'start', 3);
+    assertEqual(merged.start, ['appindicator-*', 'keyboard', 'vitalsMenu']);
+});
+
+test('merge: a wildcard matching the dragged role, and only it, is expanded', () => {
+    const lists = {start: ['appindicator-*', 'keyboard', 'apps-*'], status: []};
+    const merged = drop({}, lists, 'appindicator-1', 'status', 0);
+    assertEqual(merged.start, ['appindicator-2', 'keyboard', 'apps-*']);
+    assertEqual(merged.status, ['appindicator-1']);
+});
+
+test('merge: a wildcard whose roles are split apart is expanded, others stay', () => {
+    const lists = {start: ['appindicator-*', 'apps-*'], status: []};
+    // keyboard lands between the two tray icons.
+    const merged = drop({}, lists, 'keyboard', 'start', 1);
+    assertEqual(merged.start, ['appindicator-2', 'keyboard', 'appindicator-1', 'apps-*']);
+});
+
+test('merge: moving to the status side removes the role from the start list', () => {
+    const lists = {start: ['keyboard', 'vitalsMenu'], status: ['prayer-times']};
+    const merged = drop({}, lists, 'keyboard', 'status', 1);
+    assertEqual(merged.start, ['vitalsMenu']);
+    assertEqual(merged.status.includes('keyboard'), true);
+});
+
+test('merge: moving to the start side removes the role from the status list', () => {
+    const lists = {start: [], status: ['keyboard', 'prayer-times']};
+    const merged = drop({}, lists, 'keyboard', 'start', 0);
+    assertEqual(merged.start, ['keyboard']);
+    assertEqual(merged.status, ['prayer-times']);
+});
+
+test('merge: corner roles drop onto the start side and come back', () => {
+    let lists = {start: [], status: []};
+    for (const role of ['quickSettings', 'screenSharing']) {
+        lists = drop({}, lists, role, 'start', 0);
+        assertEqual(lists.start[0], role);
+    }
+    lists = drop({}, lists, 'quickSettings', 'status', 3);
+    assertEqual(lists.start, ['screenSharing']);
+});
+
+test('merge: with notch pages, a page role dropped on the status side stays there', () => {
+    const prefs = {barNotchPages: true};
+    let lists = {start: ['keyboard'], status: []};
+    lists = drop(prefs, lists, 'keyboard', 'status', 1);
+    assertEqual(lists.start, []);
+    const r = splitIndicators(PANEL, {...BAR, ...prefs, barStartIndicators: lists.start, barStatusOrder: lists.status});
+    assertEqual(r.home.includes('keyboard'), false);
+    assertEqual(r.barStatus[1], 'keyboard');
+});
+
+test('merge: an unlisted status tail stays unlisted when its order holds', () => {
+    const lists = {start: [], status: []};
+    const merged = drop({}, lists, 'prayer-times', 'status', 0);
+    assertEqual(merged.status, ['prayer-times']);
+});
+
+test('merge: every arrangement of single moves comes out exactly', () => {
+    const variants = [
+        [{}, {start: ['appindicator-*', 'gone'], status: ['nope-*', 'prayer-times']}],
+        [{barNotchPages: true}, {start: ['apps-menu', 'appindicator-*'], status: ['appindicator-1', 'quickSettings']}],
+        [{}, {start: [], status: ['appindicator-*', 'keyboard']}],
+    ];
+    for (const [prefs, lists] of variants) {
+        const sides = barSides(prefs, lists);
+        for (const role of [...sides.start, ...sides.status]) {
+            for (const to of ['start', 'status']) {
+                const n = sides[to].filter(x => x !== role).length;
+                for (let k = 0; k <= n; k++)
+                    drop(prefs, lists, role, to, k);
+            }
+        }
+    }
 });

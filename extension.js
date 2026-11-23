@@ -40,6 +40,11 @@ const KEYBINDING = 'dynland-toggle';
 const MAX_BUBBLES = 2;
 const BAR_PLACEMENTS = ['notch', 'dropdown'];
 
+// Bar layout: only these long-lived activities may take the notch. Every
+// other one (notification, OSD, power, anything new) is transient and always
+// appears as the dropdown under the bar, even alone with the notch free.
+const NOTCH_ACTIVITIES = new Set([Media.ID, Prayer.ID]);
+
 // Idle pill (36px) + top margin (6px) + gap (6px), in logical pixels.
 const STRUT_HEIGHT = 48;
 
@@ -57,6 +62,9 @@ export default class DynlandExtension extends Extension {
     _enable() {
         this._settings = this.getSettings();
         this._activities = new Map();
+        // Bar layout: activity id -> the place it was first shown in
+        // ('notch' or 'dropdown'), for as long as it is active (_placeInBar).
+        this._barPlaces = new Map();
 
         this._arrangement = this._currentArrangement();
         this._barLayout = this._arrangement !== 'island';
@@ -121,9 +129,6 @@ export default class DynlandExtension extends Extension {
         Main.layoutManager.addChrome(this._island, {affectsStruts: false, trackFullscreen: false});
         for (const actor of [this._corner, ...this._bubbles])
             Main.layoutManager.addChrome(actor, {affectsStruts: false, trackFullscreen: false});
-        // The bar's sides keep clear of the island (closed notch or opened)
-        // and of the notch bubble, at their current widths.
-        this._bar?.watchCentre([this._island, this._bubbles[0]]);
         this._bridge.enable(name => {
             if (name === 'corner')
                 return this._corner.slot();
@@ -295,6 +300,7 @@ export default class DynlandExtension extends Extension {
         this._bridge = null;
         this._manager = null;
         this._activities = null;
+        this._barPlaces = null;
         this._settings = null;
     }
 
@@ -354,18 +360,31 @@ export default class DynlandExtension extends Extension {
         this._island.setCompact(shown.length > 1);
     }
 
-    // Bar layout: the notch holds one activity, a dropdown under the bar a
-    // second. An activity keeps its place while it lasts: the one in the notch
-    // stays when another arrives, and a dropdown stays a dropdown when the
-    // notch's activity ends (nothing is moved between the two mid-life). A
-    // free notch takes the next activity to appear, and when several wait it
-    // takes the least important one, the one `active` lists last (lowest
-    // priority: media, then the prayer countdown, then power, OSD,
-    // notification; the oldest among equals): the long-lived activity lives
-    // in the notch and the transient one drops down. The dropdown takes the
-    // most important of the rest. Anything beyond two waits for a free place.
+    // Bar layout: the notch holds one long-lived activity (NOTCH_ACTIVITIES:
+    // media, the prayer countdown), a dropdown under the bar a second. A
+    // transient activity (notification, OSD, power) is never put in the notch,
+    // however free it is: it takes the dropdown. `active` lists the most
+    // important first (priority, newest among equals), so a free notch takes
+    // the most important waiting long-lived activity, and a free dropdown the
+    // most important of the rest (a second long-lived one included).
+    //
+    // The rule: an activity keeps the place it was first shown in for its
+    // whole life in the manager's active list (this._barPlaces). Nothing moves
+    // between the notch and the dropdown, and the dropdown stays a dropdown
+    // when the notch's activity ends. The one exception to "it stays shown":
+    // a transient activity that waits displaces a long-lived one sitting in
+    // the dropdown, which then waits (it is never shown in two places) and
+    // returns to the dropdown when it is free again, never to the notch; a
+    // free notch is only for a long-lived activity not shown yet. So an
+    // event never hides behind a countdown. Anything else waits for its place.
     _placeInBar(active) {
         const [notch, dropdown] = this._bubbles;
+        const places = this._barPlaces;
+        // An activity that left the list starts afresh if it comes back.
+        for (const id of [...places.keys()]) {
+            if (!active.some(a => a.id === id))
+                places.delete(id);
+        }
         for (const bubble of this._bubbles) {
             const activity = active.find(a => a.id === bubble.activity?.id);
             if (!activity)
@@ -373,16 +392,27 @@ export default class DynlandExtension extends Extension {
             else if (activity.content !== bubble.activity.content)
                 bubble.setActivity(activity);
         }
-        const waiting = active.filter(a => !this._bubbles.some(b => b.activity?.id === a.id));
+        const waitingNow = () => active.filter(a => !this._bubbles.some(b => b.activity?.id === a.id));
         let arrived = false;
-        if (!notch.activity && waiting.length) {
-            notch.setActivity(waiting.pop());
+        const show = (bubble, activity, place) => {
+            bubble.setActivity(activity);
+            places.set(activity.id, place);
             arrived = true;
+        };
+        if (dropdown.activity && NOTCH_ACTIVITIES.has(dropdown.activity.id)) {
+            const transient = waitingNow().find(a => !NOTCH_ACTIVITIES.has(a.id));
+            if (transient)
+                show(dropdown, transient, 'dropdown');
         }
-        if (!dropdown.activity && waiting.length) {
-            dropdown.setActivity(waiting.shift());
-            arrived = true;
-        }
+        // Never one first shown in the dropdown.
+        const longLived = waitingNow().find(a =>
+            NOTCH_ACTIVITIES.has(a.id) && places.get(a.id) !== 'dropdown');
+        if (!notch.activity && longLived)
+            show(notch, longLived, 'notch');
+        // Never one first shown in the notch (it only leaves the notch by ending).
+        const next = waitingNow().find(a => places.get(a.id) !== 'notch');
+        if (!dropdown.activity && next)
+            show(dropdown, next, 'dropdown');
         if (arrived)
             this._autoHide?.showForActivity();
         // The notch opens onto the pages only while it holds no activity.

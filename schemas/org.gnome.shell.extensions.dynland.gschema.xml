@@ -75,6 +75,10 @@
       <default>[]</default>
       <summary>Bar layout: indicators shown on the start (left) side, after the app name</summary>
     </key>
+    <key name="bar-status-order" type="as">
+      <default>[]</default>
+      <summary>Bar layout: order of the indicators on the status (right) side, leftmost first; unlisted ones follow</summary>
+    </key>
     <key name="bar-quick-indicators" type="as">
       <default>[]</default>
       <summary>Bar layout: Quick Settings indicators shown on the bar itself beside the control-centre icon (network, bluetooth, volume, microphone, battery, ...)</summary>

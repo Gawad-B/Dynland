@@ -155,6 +155,48 @@
 .dynland-bar-row { spacing: 2px; }
 .dynland-bar .panel-button { -natural-hpadding: 7px; -minimum-hpadding: 4px; color: #ffffff; }
 .dynland-app-menu-label { font-weight: bold; padding-left: 6px; }
+/* One size for every icon on the bar, and one size and weight for its text.
+   barCompact.js sets every bar icon's icon_size to 16 (St prefers it to CSS);
+   this agrees, at ID level so it beats GNOME's
+   `#panel .panel-button .system-status-icon { icon-size: 1.091em }`. */
+#dynlandBar #panel StIcon { icon-size: 16px; }
+.dynland-bar StLabel { font-size: 13px; font-weight: 500; }
+.dynland-bar .dynland-app-menu-label { font-weight: bold; }
+/* Quick Settings in the bar: its chosen indicators are items of their own that
+   open their own panel, so the button itself never lights up (GNOME lights a
+   panel button with an inset box-shadow on #panel .panel-button:hover,
+   :focus, :active, :checked); only the hovered or pressed item, or the
+   control item, does. ID-level selectors, so they win over GNOME's. */
+#dynlandBar #panel .panel-button.dynland-quick-settings,
+#dynlandBar #panel .panel-button.dynland-quick-settings:hover,
+#dynlandBar #panel .panel-button.dynland-quick-settings:focus,
+#dynlandBar #panel .panel-button.dynland-quick-settings:active,
+#dynlandBar #panel .panel-button.dynland-quick-settings:checked,
+#dynlandBar #panel .panel-button.dynland-quick-settings:active:hover,
+#dynlandBar #panel .panel-button.dynland-quick-settings:checked:hover {
+  box-shadow: inset 0 0 0 100px transparent;
+  background-color: transparent;
+}
+#dynlandBar #panel .dynland-quick-item {
+  padding: 0 5px;
+  margin: 2px 0;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 100px transparent;
+  transition-duration: 150ms;
+}
+#dynlandBar #panel .dynland-quick-item:hover { box-shadow: inset 0 0 0 100px rgba(255, 255, 255, 0.17); }
+/* Pressed or open: the item that opened the menu (:active, set by
+   barCompact.js), or the control item when the button opened it. */
+#dynlandBar #panel .dynland-quick-item:active,
+#dynlandBar #panel .dynland-quick-settings:active .dynland-control-item,
+#dynlandBar #panel .dynland-quick-settings:checked .dynland-control-item {
+  box-shadow: inset 0 0 0 100px rgba(255, 255, 255, 0.28);
+}
+#dynlandBar #panel .dynland-quick-item:active:hover,
+#dynlandBar #panel .dynland-quick-settings:active .dynland-control-item:hover,
+#dynlandBar #panel .dynland-quick-settings:checked .dynland-control-item:hover {
+  box-shadow: inset 0 0 0 100px rgba(255, 255, 255, 0.32);
+}
 /* The island acting as the bar's notch: closed and empty */
 .dynland-island.dynland-notch { background-color: #000000; min-width: 180px; min-height: 32px; padding: 0; }
 .dynland-island.dynland-notch.dynland-translucent { background-color: #000000; min-width: 180px; min-height: 32px; padding: 0; }

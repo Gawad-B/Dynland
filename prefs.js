@@ -94,10 +94,12 @@ export default class DynlandPreferences extends ExtensionPreferences {
         barQuick.tooltip_text = 'Accepted names: network, bluetooth, volume, microphone, battery, nightlight, rfkill, location, camera';
         const barGroup = group('MacBook bar', [
             listRow(settings, 'bar-start-indicators', 'Left side (comma-separated)'),
+            listRow(settings, 'bar-status-order', 'Right side order (comma-separated)'),
             barQuick,
             listRow(settings, 'bar-icon-only', 'Icon only (comma-separated)'),
         ], 'Role names as in Indicator placement; these apply to the MacBook bar layout only. ' +
-            'Quick Settings items: network, bluetooth, volume, microphone, battery, nightlight, rfkill, location, camera.');
+            'Quick Settings items: network, bluetooth, volume, microphone, battery, nightlight, rfkill, location, camera. ' +
+            'You can also hold Super and drag items on the bar to rearrange them.');
         const syncSensitivity = () => {
             const isBar = settings.get_string('layout') === 'bar';
             barNotchPages.sensitive = isBar;

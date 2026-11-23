@@ -13,10 +13,14 @@ import {matchesRole, splitIndicators} from './lib/layout.js';
 
 // Not `layout` or `bar-notch-pages`: a change there rebuilds the whole
 // extension (extension.js), bridge included; refresh() only reads them.
+// The layout slots that are the bar's boxes (the rest are the island's).
+const BAR_SLOTS = ['barStart', 'barStatus', 'barClock'];
+
 const LAYOUT_KEYS = [
     'show-clock', 'show-quick-settings', 'show-activities',
     'show-tray-indicators', 'idle-indicators', 'home-indicators',
     'bar-start-indicators', 'bar-quick-indicators', 'bar-icon-only',
+    'bar-status-order',
 ];
 
 export class PanelBridge {
@@ -123,6 +127,7 @@ export class PanelBridge {
             idleIndicators: this._settings.get_strv('idle-indicators'),
             homeIndicators: this._settings.get_strv('home-indicators'),
             barStartIndicators: this._settings.get_strv('bar-start-indicators'),
+            barStatusOrder: this._settings.get_strv('bar-status-order'),
             // Quick Settings always lives at the end of the island's second page.
             cornerInIsland: true,
             bar: this._settings.get_string('layout') === 'bar',
@@ -130,6 +135,7 @@ export class PanelBridge {
         });
 
         const lent = [];
+        const onBar = new Set();
         for (const [slot, roles] of Object.entries(split)) {
             if (!roles.length)
                 continue;
@@ -139,22 +145,31 @@ export class PanelBridge {
             for (const role of roles) {
                 this._borrow(role, box);
                 lent.push(role);
+                if (BAR_SLOTS.includes(slot))
+                    onBar.add(role);
             }
         }
 
         // Compact indicators only make sense on the bar.
         if (this._settings.get_string('layout') === 'bar')
-            this._compact(lent);
+            this._compact(lent, onBar);
     }
 
     // Quick Settings is condensed instead of trimmed: its icons are the
-    // system indicators, not text to drop.
-    _compact(lent) {
+    // system indicators, not text to drop. Every other indicator placed in
+    // the bar's boxes gets the bar's one icon size; those lent to the
+    // island's notch pages keep the island's.
+    _compact(lent, onBar) {
         const iconOnly = this._settings.get_strv('bar-icon-only');
         this._trimmer = new IndicatorTrimmer();
         for (const role of lent) {
-            if (role !== 'quickSettings' && matchesRole(role, iconOnly))
-                this._trimmer.trim(Main.panel.statusArea[role]);
+            const indicator = Main.panel.statusArea[role];
+            if (role === 'quickSettings')
+                continue;
+            if (matchesRole(role, iconOnly))
+                this._trimmer.trim(indicator, role);
+            if (onBar.has(role))
+                this._trimmer.size(indicator);
         }
         if (lent.includes('quickSettings')) {
             this._condenser = new QuickSettingsCondenser();

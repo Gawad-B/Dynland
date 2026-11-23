@@ -80,6 +80,7 @@ export const Bubble = GObject.registerClass({
         this._fullscreenHidden = false; // AutoHide: slid out for fullscreen
         this._bare = false;
         this._bareHeight = BARE_HEIGHT; // logical px, of the island's closed state
+        this._bareScale = 0; // the scale the compact row's height was set at
         this._errorSources = new Set();
 
         // The compact row is named 'panel' so it is exactly as tall as the island's rows.
@@ -371,14 +372,27 @@ export const Bubble = GObject.registerClass({
         this._setBare(bare, notch ? BAR_HEIGHT : BARE_HEIGHT);
     }
 
+    // The row height is in physical px, so a changed scale redoes it even
+    // when the state is the same (_onScale).
     _setBare(bare, height) {
-        if (bare === this._bare && (!bare || height === this._bareHeight))
+        const scale = scaleFactor();
+        if (bare === this._bare && (!bare || height === this._bareHeight) && scale === this._bareScale)
             return;
         this._bare = bare;
         this._bareHeight = height;
+        this._bareScale = scale;
         // The compact row otherwise keeps GNOME's panel height; the width is
         // clamped in the size requests below, which the morph reads.
-        this._compactBin.height = bare ? (height - 2 * BARE_PADDING) * scaleFactor() : -1;
+        this._compactBin.height = bare ? (height - 2 * BARE_PADDING) * scale : -1;
+    }
+
+    // From MorphBox's deferred scale step: the bare row height, and the
+    // clamped widths and heights (read afresh from the size requests, which
+    // the relayout after this asks again), follow the new scale. The
+    // position (the gap, the top edge) is _reposition's, run next.
+    _onScale() {
+        this._syncBare();
+        this._queueFollow();
     }
 
     // Whatever the island did while this was off the stage, catch up.

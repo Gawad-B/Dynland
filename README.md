@@ -47,6 +47,8 @@ instead of copying it, so edits apply on the next shell restart.
   Three lists in the "MacBook bar" group of the preferences choose which indicators sit on
   the left after the app name, which Quick Settings items (network, volume, battery, ...)
   show on the bar beside the control-centre icon, and which show as an icon without text.
+  Holding Super and dragging items on the bar rearranges them; the right side's order is
+  stored in the "Right side order" setting there.
 - The island lives on the primary monitor only.
 - Panel items that have no status-area role (rare) are hidden while Dynland is enabled.
 

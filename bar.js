@@ -2,10 +2,10 @@
 // primary monitor, like the macOS menu bar. It offers three boxes (left,
 // status, clock) that borrowed GNOME panel indicators are placed into. The
 // island is drawn above it as the notch, black and centred, and the bar's
-// content keeps clear of whatever is drawn there at its current width (the
-// closed notch, a wider notch bubble, the opened island; BarRow). When a side
-// is too wide for its half, whole indicators move to the other side (MenuBar)
-// instead of being cut off.
+// content keeps clear of the closed notch, always (a constant: whatever the
+// notch is doing, nothing below it ever moves; BarRow). When a side is too
+// wide for its half, whole indicators move to the other side (MenuBar)
+// instead of being cut off, by their own widths only.
 
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
@@ -15,6 +15,7 @@ import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {BarDnd} from './barDnd.js';
 import {scaleFactor} from './morphBox.js';
 
 export const BAR_HEIGHT = 32; // logical px
@@ -26,8 +27,6 @@ const NOTCH_GAP = 8;
 // be moved onto the other side: a width hovering at the limit must not make
 // indicators hop between the sides.
 const HYSTERESIS = 16;
-// Whatever is in the middle, each side keeps at least this share of the bar.
-const MIN_SIDE_SHARE = 0.25;
 // While an indicator menu is open nothing moves (moving a container unmaps
 // it and closes its menu); look again this often, in ms.
 const MENU_RETRY_MS = 500;
@@ -82,9 +81,8 @@ class StatusClip extends St.Widget {
 // their notch end), each side stopping short of the notch in the middle.
 // Placed here, in the layout itself, never by moving anything from a signal
 // handler. The bar's padding is the same on both sides, so the row's middle
-// is the monitor's, where the notch is. The middle kept clear is the widest
-// of the closed notch and `centreWidth` (px, set by MenuBar from a later),
-// capped so each side keeps MIN_SIDE_SHARE of the bar. After each layout it
+// is the monitor's, where the notch is. The middle kept clear is the closed
+// notch (a constant) plus a gap, whatever is drawn there. After each layout it
 // tells its owner (onAllocated, which only reads) so a side that no longer
 // fits is noticed.
 const BarRow = GObject.registerClass(
@@ -104,8 +102,6 @@ class BarRow extends St.Widget {
         // plans the moves with. Null until the row has been laid out.
         this.rooms = null;
         this.onAllocated = null;
-        // The width of what is drawn in the middle now, px; 0: the closed notch.
-        this.centreWidth = 0;
         // A start box squeezed below its minimum (the app name already
         // down to its ellipsis) must not draw under the notch either.
         start.clip_to_allocation = true;
@@ -144,12 +140,8 @@ class BarRow extends St.Widget {
         const spacing = node.get_length('spacing');
         const scale = scaleFactor();
         const middle = box.get_width() / 2;
-        // Each side may reach to half of what is in the middle (never less
-        // than the closed notch) plus a gap from the middle, but keeps at
-        // least its share of the bar.
-        const centre = Math.max(NOTCH_WIDTH * scale, this.centreWidth);
-        const clear = Math.min(centre / 2 + NOTCH_GAP * scale,
-            box.get_width() * (0.5 - MIN_SIDE_SHARE));
+        // Each side may reach to half of the closed notch plus a gap from the middle.
+        const clear = NOTCH_WIDTH * scale / 2 + NOTCH_GAP * scale;
         const leftEnd = Math.max(content.x1, Math.floor(middle - clear));
         const rightStart = Math.min(content.x2, Math.ceil(middle + clear));
 
@@ -190,8 +182,9 @@ class BarRow extends St.Widget {
 export const MenuBar = GObject.registerClass(
 class MenuBar extends St.Widget {
     /**
-     * @param {Gio.Settings} settings Dynland settings. Unused: the bar is
-     *     always translucent, whatever the island's style.
+     * @param {Gio.Settings} settings Dynland settings (the bar is always
+     *     translucent, whatever the island's style); drag and drop writes
+     *     the indicators' order to them
      * @param {object} [deps]
      * @param {() => boolean} [deps.anyMenuOpen] true while an indicator's
      *     menu is open (nothing is moved then); default: never
@@ -231,9 +224,6 @@ class MenuBar extends St.Widget {
         this._order = new Map();
         this._anyMenuOpen = anyMenuOpen;
         this._retryId = 0;
-        // What is drawn in the middle (watchCentre) and the later measuring it.
-        this._centreActors = [];
-        this._centreLaterId = 0;
         this._laterId = 0;
         this._applying = false;
         this._destroyed = false;
@@ -256,6 +246,9 @@ class MenuBar extends St.Widget {
                 this);
         }
 
+        // Drag and drop of the indicators (Super held); needs the boxes above.
+        this._dnd = new BarDnd(settings, this);
+
         this.connect('destroy', () => this._onDestroy());
         Main.layoutManager.connectObject('monitors-changed', () => this.reposition(), this);
         St.ThemeContext.get_for_stage(global.stage).connectObject(
@@ -269,70 +262,26 @@ class MenuBar extends St.Widget {
         this._queueRebalance();
     }
 
-    /**
-     * Keep the middle clear of these actors (the island, the notch bubble)
-     * at their current widths, while they are shown. Measured in a later,
-     * never from their size notifications (which come mid-layout).
-     *
-     * @param {Clutter.Actor[]} actors
-     */
-    watchCentre(actors) {
-        for (const actor of actors) {
-            if (this._centreActors.includes(actor))
-                continue;
-            this._centreActors.push(actor);
-            actor.connectObject(
-                'notify::width', () => this._queueCentre(),
-                'notify::visible', () => this._queueCentre(),
-                'destroy', () => {
-                    this._centreActors = this._centreActors.filter(a => a !== actor);
-                    this._queueCentre();
-                }, this);
-        }
-        this._queueCentre();
-    }
-
-    _queueCentre() {
-        if (this._centreLaterId || this._destroyed || !this.get_stage())
-            return;
-        this._centreLaterId = global.compositor.get_laters().add(Meta.LaterType.BEFORE_REDRAW, () => {
-            this._centreLaterId = 0;
-            if (this._destroyed || !this.get_stage())
-                return GLib.SOURCE_REMOVE;
-            let width = 0;
-            for (const actor of this._centreActors) {
-                if (actor.visible && actor.get_stage())
-                    width = Math.max(width, actor.width);
-            }
-            width = Math.ceil(width);
-            if (width !== this._row.centreWidth) {
-                this._row.centreWidth = width;
-                // The row's next layout measures the sides and queues the rebalance.
-                this._row.queue_relayout();
-            }
-            return GLib.SOURCE_REMOVE;
-        });
+    // Drag and drop ended (dropped or cancelled): the moves held while it
+    // ran (_rebalance) are looked at once now.
+    dragEnded() {
+        this._queueRebalance();
     }
 
     _onDestroy() {
         this._destroyed = true;
+        this._dnd?.destroy();
+        this._dnd = null;
         this._row.onAllocated = null;
         const laters = global.compositor.get_laters();
         if (this._laterId) {
             laters.remove(this._laterId);
             this._laterId = 0;
         }
-        if (this._centreLaterId) {
-            laters.remove(this._centreLaterId);
-            this._centreLaterId = 0;
-        }
         if (this._retryId) {
             GLib.source_remove(this._retryId);
             this._retryId = 0;
         }
-        for (const actor of this._centreActors)
-            actor.disconnectObject(this);
-        this._centreActors = [];
         this._fromStatus = [];
         this._fromStart = [];
         this._order.clear();
@@ -517,8 +466,12 @@ class MenuBar extends St.Widget {
     }
 
     // Runs from the later, outside any layout pass. Nothing moves while an
-    // indicator menu is open; it looks again once they are closed.
+    // indicator menu is open; it looks again once they are closed. Nothing
+    // moves during a drag either (the drop place is read from the boxes as
+    // they are): BarDnd calls dragEnded() when it is over.
     _rebalance() {
+        if (this._dnd?.dragging)
+            return;
         const ops = this._plan();
         if (!ops || ops.length === 0)
             return;
@@ -565,6 +518,21 @@ class MenuBar extends St.Widget {
         } finally {
             this._applying = false;
         }
+    }
+
+    /**
+     * The boxes drag and drop reads, in visual order: start, toStart (status
+     * indicators the overflow moved to the start side), toStatus (start-side
+     * ones moved to the status side), status, and the clock's.
+     */
+    dndBoxes() {
+        return {
+            start: this._slots.barStart,
+            toStart: this._toStart,
+            toStatus: this._toStatus,
+            status: this._slots.barStatus,
+            clock: this._slots.barClock,
+        };
     }
 
     slot(name) {
