@@ -20,7 +20,7 @@ import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {mergeBarLists} from './lib/layout.js';
+import {groupTrayStatus, isTrayRole, mergeBarLists} from './lib/layout.js';
 import {scaleFactor} from './morphBox.js';
 
 // Logical px the pointer must move with the button down before a drag starts.
@@ -394,7 +394,9 @@ export class BarDnd {
             order.splice(target.k, 0, dragged);
         }
         const rolesOf = home => order.filter(u => u.role && u.home === home).map(u => u.role);
-        return {start: rolesOf('start'), status: rolesOf('status')};
+        // Tray icons have a fixed place on the status side (after keyboard):
+        // arrange them as the layout will, so dropping one there changes nothing.
+        return {start: rolesOf('start'), status: groupTrayStatus(rolesOf('status'))};
     }
 
     _drop(x, y) {
@@ -411,6 +413,10 @@ export class BarDnd {
             return;
 
         const before = this._arrangement(collected.units, null, null);
+        // A tray icon dropped on the status side keeps its place there (after
+        // keyboard, with the other tray icons): nothing to write.
+        if (isTrayRole(dragged.role ?? '') && !target.left && before.status.includes(dragged.role))
+            return;
         const after = this._arrangement(collected.units, drag.actor, target);
         const same = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
         if (same(before.start, after.start) && same(before.status, after.status))

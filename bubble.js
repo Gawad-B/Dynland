@@ -8,7 +8,11 @@
 //              empty notch underneath. Centred on the monitor, flush with the
 //              top, never smaller than the closed notch, bar-high while compact,
 //              notch corners (flat top, round bottom). Hover or click opens the
-//              expanded card downward from it.
+//              expanded card downward from it. It never fades or scales: it
+//              appears already opaque at exactly the closed notch's size and
+//              its width and height morph to the activity's size, and back to
+//              the closed notch (then it hides) when the activity ends, so the
+//              notch itself seems to grow and shrink.
 //   'dropdown' bar layout: a card centred under the bar with a small gap,
 //              showing the expanded card if the activity has one (else the
 //              compact row), fully rounded. Hovering only holds its timeout.
@@ -25,7 +29,10 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {BAR_HEIGHT, NOTCH_WIDTH} from './bar.js';
-import {MorphBox, TOP_MARGIN, scaleFactor} from './morphBox.js';
+import {
+    CONTENT_IN_DELAY_MS, CONTENT_IN_MS, CONTENT_IN_SCALE, CONTENT_OUT_MS, EXPANDED_RADIUS, MORPH_MS,
+    MorphBox, TOP_MARGIN, scaleFactor,
+} from './morphBox.js';
 
 const GAP = 8; // logical px between the island and the bubble
 // The island's empty pill (stylesheet .dynland-bare) is 80x24 with no padding;
@@ -37,8 +44,11 @@ const BARE_PADDING = 2;
 const POP_IN_MS = 220;
 const POP_OUT_MS = 140;
 const POP_SCALE = 0.4;
-// The notch bubble grows sideways out of the notch instead.
-const NOTCH_POP_SCALE_X = 0.6;
+// The notch bubble does not pop: its content fades in like MorphBox's own
+// state change (its timings), while the shape morphs from the closed notch.
+// Safety net: a leaving notch that has not hidden this long after its
+// content-out and morph should have ended is hidden anyway.
+const NOTCH_LEAVE_MARGIN_MS = 500;
 const DROPDOWN_GAP = 6; // logical px between the bar and a dropdown card
 const SLIDE_MS = 200;
 
@@ -83,6 +93,8 @@ export const Bubble = GObject.registerClass({
         this._bareHeight = BARE_HEIGHT; // logical px, of the island's closed state
         this._bareScale = 0; // the scale the compact row's height was set at
         this._errorSources = new Set();
+        this._leaveLaterId = 0; // notch: the deferred "has it reached the closed notch" check
+        this._leaveWatchdogId = 0;
 
         // The compact row is named 'panel' so it is exactly as tall as the island's rows.
         this._compactBin = new St.Bin({
@@ -128,6 +140,7 @@ export const Bubble = GObject.registerClass({
             if (this._followId)
                 global.compositor.get_laters().remove(this._followId);
             this._followId = 0;
+            this._cancelLeaveWatch();
             for (const id of this._errorSources)
                 GLib.source_remove(id);
             this._errorSources.clear();
@@ -163,6 +176,10 @@ export const Bubble = GObject.registerClass({
 
     _syncVisible() {
         this.visible = this._wanted && !this._fullscreenHidden;
+        // A notch shrinking away that gets hidden (fullscreen) has nothing
+        // left to show: finish now, its transitions may not advance unmapped.
+        if (this._placement === 'notch' && this._poppingOut && !this._activity && !this.visible)
+            this._clearPop();
     }
 
     /** @param {?{id: string, content: object}} current from ActivityManager */
@@ -196,6 +213,10 @@ export const Bubble = GObject.registerClass({
     }
 
     _popIn() {
+        if (this._placement === 'notch') {
+            this._popInNotch();
+            return;
+        }
         this._poppingOut = false;
         this.remove_transition('opacity');
         this.remove_transition('scale-x');
@@ -227,20 +248,27 @@ export const Bubble = GObject.registerClass({
     }
 
     _popScale() {
-        return this._placement === 'notch' ? [NOTCH_POP_SCALE_X, 1] : [POP_SCALE, POP_SCALE];
+        return [POP_SCALE, POP_SCALE];
+    }
+
+    // Hidden for good (nothing shown, back to the empty compact state).
+    _clearPop() {
+        this._poppingOut = false;
+        this._cancelLeaveWatch();
+        this._wanted = false;
+        this._syncVisible();
+        this.opacity = 255;
+        this.set_scale(1, 1);
+        this._render();
     }
 
     _popOut() {
-        const clear = () => {
-            this._poppingOut = false;
-            this._wanted = false;
-            this._syncVisible();
-            this.opacity = 255;
-            this.set_scale(1, 1);
-            this._render();
-        };
         if (this._retired || !this.visible || !this.mapped || !this._motionAllowed()) {
-            clear();
+            this._clearPop();
+            return;
+        }
+        if (this._placement === 'notch') {
+            this._leaveNotch();
             return;
         }
         this._poppingOut = true;
@@ -252,9 +280,140 @@ export const Bubble = GObject.registerClass({
             mode: Clutter.AnimationMode.EASE_IN_QUAD,
             onComplete: () => {
                 if (this._poppingOut && !this._activity)
-                    clear();
+                    this._clearPop();
             },
         });
+    }
+
+    // ---- Notch: the shape itself grows out of the closed notch and shrinks back.
+
+    // The closed notch's size in physical px (what the island's notch is).
+    _closedSize() {
+        const scale = scaleFactor();
+        return [NOTCH_WIDTH * scale, Math.round(BAR_HEIGHT * scale)];
+    }
+
+    // Arriving. Called after setActivity's _render() (which, with the bubble
+    // hidden, applied the content at its natural size without animating).
+    //  - Still on screen shrinking (_poppingOut): take over. _render() already
+    //    superseded the shrink and morphs from the current size to the new
+    //    one; nothing is reset, so there is no jump to closed and back.
+    //  - Otherwise: show it opaque at exactly the closed notch (size, corner
+    //    radius, flush with the top), then morph to the natural size and fade
+    //    the content in the way MorphBox's _swapIn does.
+    _popInNotch() {
+        if (this._poppingOut && this._wanted) {
+            this._poppingOut = false;
+            this._cancelLeaveWatch();
+            this._syncVisible();
+            return;
+        }
+        this._poppingOut = false;
+        this._cancelLeaveWatch();
+        this.remove_transition('opacity');
+        this.remove_transition('scale-x');
+        this.remove_transition('scale-y');
+        this.opacity = 255;
+        this.set_scale(1, 1);
+        this._wanted = true;
+        if (!this._motionAllowed()) {
+            this._syncVisible();
+            this._reposition();
+            return;
+        }
+        // Before it is visible, so no frame is drawn at another size or radius.
+        this._stopMorph();
+        this._resetContent();
+        this._radius = Math.min(Math.round(BAR_HEIGHT / 2), EXPANDED_RADIUS);
+        this.set_style(this._radiusStyle(this._radius));
+        const [width, height] = this._closedSize();
+        this.set_size(width, height);
+        this._syncVisible();
+        this._reposition();
+        if (!this.visible || !this.mapped) {
+            // Hidden for a fullscreen window: nothing to see, show it at its size.
+            this._stopMorph();
+            this.set_size(-1, -1);
+            return;
+        }
+        const incoming = this._containers().filter(a => a.visible);
+        for (const actor of incoming) {
+            actor.opacity = 0;
+            actor.set_scale(CONTENT_IN_SCALE, CONTENT_IN_SCALE);
+        }
+        this._morph(true);
+        for (const actor of incoming) {
+            actor.ease({
+                opacity: 255,
+                scale_x: 1,
+                scale_y: 1,
+                duration: CONTENT_IN_MS,
+                delay: CONTENT_IN_DELAY_MS,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+            });
+        }
+    }
+
+    // Leaving: _render() with no activity fades the content out, then
+    // morphs the shape to _naturalSize(), which is the closed notch. The
+    // bubble hides only once that morph is over (_queueLeaveCheck).
+    // Already leaving: the extension clears empty bubbles on every manager
+    // change, and restarting here would postpone the watchdog forever.
+    _leaveNotch() {
+        if (this._poppingOut && !this._activity)
+            return;
+        this._poppingOut = true;
+        this._cancelLeaveWatch();
+        // Animations run slower by the shell's slow-down factor; so does this.
+        const watchdogMs = Math.round((CONTENT_OUT_MS + MORPH_MS + NOTCH_LEAVE_MARGIN_MS) *
+            St.Settings.get().slow_down_factor);
+        this._leaveWatchdogId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, watchdogMs, () => {
+            this._leaveWatchdogId = 0;
+            if (this._poppingOut && !this._activity)
+                this._clearPop();
+            return GLib.SOURCE_REMOVE;
+        });
+        this._render();
+    }
+
+    _cancelLeaveWatch() {
+        if (this._leaveLaterId)
+            global.compositor.get_laters().remove(this._leaveLaterId);
+        this._leaveLaterId = 0;
+        if (this._leaveWatchdogId)
+            GLib.source_remove(this._leaveWatchdogId);
+        this._leaveWatchdogId = 0;
+    }
+
+    // Before the next frame: hide if the shape is at rest while leaving.
+    // A morph that is still playing, or the fade-out before it, re-queues
+    // this when it ends (_morph below, and _morphStopped).
+    _queueLeaveCheck() {
+        if (this._leaveLaterId || !this._live())
+            return;
+        this._leaveLaterId = global.compositor.get_laters().add(Meta.LaterType.BEFORE_REDRAW, () => {
+            this._leaveLaterId = 0;
+            if (!this._live() || !this._poppingOut || this._activity || this._pending)
+                return GLib.SOURCE_REMOVE;
+            const playing = ['width', 'height'].some(name => this.get_transition(name)?.is_playing());
+            if (!playing)
+                this._clearPop();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _morph(animate) {
+        super._morph(animate);
+        if (this._placement !== 'notch' || !this._poppingOut || this._activity)
+            return;
+        this._queueLeaveCheck();
+    }
+
+    // Interrupted (a scale change) or finished, whether the width, the
+    // height or both moved: either way, check again.
+    _morphStopped() {
+        if (this._placement === 'notch' && this._poppingOut && !this._activity)
+            this._queueLeaveCheck();
     }
 
     _setActivityExpanded(expanded) {
@@ -322,6 +481,9 @@ export const Bubble = GObject.registerClass({
     }
 
     _naturalSize() {
+        // A notch with nothing to show is the closed notch, exactly.
+        if (this._placement === 'notch' && !this._activity)
+            return this._closedSize();
         const [width, height] = super._naturalSize();
         return [this._withBareWidth([0, width])[1], this._withIslandHeight([0, height])[1]];
     }

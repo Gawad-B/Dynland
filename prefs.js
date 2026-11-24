@@ -140,6 +140,7 @@ export default class DynlandPreferences extends ExtensionPreferences {
             switchRow(settings, 'activity-media', 'Media playing', 'Spotify, browsers, mpv and other MPRIS players'),
             switchRow(settings, 'activity-osd', 'Volume and brightness', 'Replaces GNOME\'s centre-screen popup'),
             switchRow(settings, 'activity-power', 'Charging and low battery'),
+            switchRow(settings, 'activity-recording', 'Screen recording', 'Elapsed time and a Stop button; in the MacBook bar it replaces the red indicator on the bar'),
             prayer,
             lead,
         ]));

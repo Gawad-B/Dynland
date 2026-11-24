@@ -22,6 +22,7 @@ import * as Notifications from './activities/notifications.js';
 import * as Osd from './activities/osd.js';
 import * as Power from './activities/power.js';
 import * as Prayer from './activities/prayer.js';
+import * as Recording from './activities/recording.js';
 
 // Settings key → [activity id, activity class]
 const ACTIVITIES = {
@@ -30,6 +31,7 @@ const ACTIVITIES = {
     'activity-osd': [Osd.ID, Osd.OsdActivity],
     'activity-power': [Power.ID, Power.PowerActivity],
     'activity-prayer': [Prayer.ID, Prayer.PrayerActivity],
+    'activity-recording': [Recording.ID, Recording.RecordingActivity],
 };
 
 // Mutter keybinding names are global, so keep ours distinctive.
@@ -40,10 +42,14 @@ const KEYBINDING = 'dynland-toggle';
 const MAX_BUBBLES = 2;
 const BAR_PLACEMENTS = ['notch', 'dropdown'];
 
-// Bar layout: only these long-lived activities may take the notch. Every
+// Bar layout: only these long-lived activities may take the notch (the screen
+// recording is one: it lasts as long as the recording). Every
 // other one (notification, OSD, power, anything new) is transient and always
 // appears as the dropdown under the bar, even alone with the notch free.
-const NOTCH_ACTIVITIES = new Set([Media.ID, Prayer.ID]);
+const NOTCH_ACTIVITIES = new Set([Media.ID, Prayer.ID, Recording.ID]);
+// Of those, the ones that own the notch: shown only there, never in the
+// dropdown, and they take it from any other long-lived activity.
+const OWNS_NOTCH = new Set([Recording.ID]);
 
 // Idle pill (36px) + top margin (6px) + gap (6px), in logical pixels.
 const STRUT_HEIGHT = 48;
@@ -362,20 +368,29 @@ export default class DynlandExtension extends Extension {
 
     // Bar layout: the notch holds one activity, a dropdown under the bar a
     // second. Long-lived activities (NOTCH_ACTIVITIES: media, the prayer
-    // countdown) belong in the notch; a transient one (notification, OSD,
-    // power) is shown in the notch too while nothing else is there, and drops
-    // down under the bar when the notch is taken. `active` lists the most
-    // important first (priority, newest among equals). When a long-lived and
-    // a transient activity arrive together, the long-lived one gets the notch.
+    // countdown, the screen recording) belong in the notch; a transient one
+    // (notification, OSD, power) is shown in the notch too while nothing
+    // else is there, and drops down under the bar when the notch is taken.
+    // `active` lists the most important first (priority, newest among
+    // equals). When a long-lived and a transient activity arrive together,
+    // the long-lived one gets the notch, and of those one that owns the
+    // notch (OWNS_NOTCH: the recording) first.
     //
     // The rule: an activity keeps the place it was first shown in for its
     // whole life in the manager's active list (this._barPlaces). Nothing moves
-    // between the notch and the dropdown. Two exceptions to "it stays shown":
-    // a transient activity that waits displaces a long-lived one sitting in
-    // the dropdown, which then waits and returns to the dropdown when it is
-    // free again; and a long-lived activity that starts while a transient
-    // one holds the notch waits for the notch (transients are short) instead
-    // of settling in the dropdown for good.
+    // between the notch and the dropdown. The exceptions to "it stays shown":
+    // - a transient activity that waits displaces a long-lived one sitting in
+    //   the dropdown, which then waits and returns to the dropdown when it is
+    //   free again;
+    // - a long-lived activity that starts while a transient one holds the
+    //   notch waits for the notch (transients are short) instead of settling
+    //   in the dropdown for good; so does one that starts while an owner
+    //   holds it (the recording has the notch for as long as it lasts);
+    // - an owner is never shown in the dropdown. It takes the notch from a
+    //   long-lived activity, which waits, shown nowhere, and returns to the
+    //   notch when the owner ends (its place stays 'notch'); from a
+    //   transient one it does not, it waits for the notch like any other
+    //   long-lived activity. Transients meanwhile drop down as usual.
     _placeInBar(active) {
         const [notch, dropdown] = this._bubbles;
         const places = this._barPlaces;
@@ -392,6 +407,7 @@ export default class DynlandExtension extends Extension {
                 bubble.setActivity(activity);
         }
         const longLivedId = id => NOTCH_ACTIVITIES.has(id);
+        const ownsNotchId = id => OWNS_NOTCH.has(id);
         const waitingNow = () => active.filter(a => !this._bubbles.some(b => b.activity?.id === a.id));
         let arrived = false;
         const show = (bubble, activity, place) => {
@@ -403,10 +419,19 @@ export default class DynlandExtension extends Extension {
             places.set(activity.id, place);
             arrived = true;
         };
-        // The notch: a long-lived activity first (never one first shown in
-        // the dropdown), else a transient one not shown yet.
+        // An owner takes the notch from a long-lived activity in place (the
+        // bubble morphs from what it shows); the one displaced keeps its
+        // 'notch' place, so it waits for the notch and nowhere else.
+        if (notch.activity && longLivedId(notch.activity.id) && !ownsNotchId(notch.activity.id)) {
+            const owner = waitingNow().find(a => ownsNotchId(a.id));
+            if (owner)
+                show(notch, owner, 'notch');
+        }
+        // The notch: an owner first, then a long-lived activity (never one
+        // first shown in the dropdown), else a transient one not shown yet.
         if (!notch.activity) {
             const forNotch =
+                waitingNow().find(a => ownsNotchId(a.id)) ??
                 waitingNow().find(a => longLivedId(a.id) && places.get(a.id) !== 'dropdown') ??
                 waitingNow().find(a => !longLivedId(a.id) && !places.has(a.id));
             if (forNotch)
@@ -417,11 +442,13 @@ export default class DynlandExtension extends Extension {
             if (transient)
                 show(dropdown, transient, 'dropdown');
         }
-        // Never one first shown in the notch (it only leaves the notch by
-        // ending); a new long-lived one waits for a notch held by a transient.
-        const notchIsTransient = notch.activity && !longLivedId(notch.activity.id);
-        const next = waitingNow().find(a => places.get(a.id) !== 'notch' &&
-            !(notchIsTransient && longLivedId(a.id) && !places.has(a.id)));
+        // Never one first shown in the notch (it leaves the notch only by
+        // ending or for an owner), never an owner; a new long-lived one waits
+        // for a notch held by a transient or by an owner.
+        const newLongLivedWait = notch.activity &&
+            (!longLivedId(notch.activity.id) || ownsNotchId(notch.activity.id));
+        const next = waitingNow().find(a => places.get(a.id) !== 'notch' && !ownsNotchId(a.id) &&
+            !(newLongLivedWait && longLivedId(a.id) && !places.has(a.id)));
         if (!dropdown.activity && next)
             show(dropdown, next, 'dropdown');
         if (arrived)

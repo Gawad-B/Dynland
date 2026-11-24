@@ -10,14 +10,14 @@ import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-const CONTENT_OUT_MS = 50;
-const MORPH_MS = 240;
-const CONTENT_IN_MS = 140;
+export const CONTENT_OUT_MS = 50;
+export const MORPH_MS = 240;
+export const CONTENT_IN_MS = 140;
 // The shape is ~70% of the way there by then (EASE_OUT_CUBIC), so the
 // content never reflows visibly and the pill is never empty for long.
-const CONTENT_IN_DELAY_MS = 70;
-const CONTENT_IN_SCALE = 0.97;
-const EXPANDED_RADIUS = 24; // CSS px: St scales inline px by the theme scale factor
+export const CONTENT_IN_DELAY_MS = 70;
+export const CONTENT_IN_SCALE = 0.97;
+export const EXPANDED_RADIUS = 24; // CSS px: St scales inline px by the theme scale factor
 export const TOP_MARGIN = 0; // flush with the screen edge, like a MacBook notch
 
 export function scaleFactor() {
@@ -429,8 +429,13 @@ class MorphBox extends St.BoxLayout {
                 this._morphTarget = null;
                 this.set_size(-1, -1);
             },
+            // Finished or interrupted, and whichever of width/height moved.
+            onStopped: () => this._morphStopped(),
         });
     }
+
+    // A subclass hook: runs whenever a morph ends, finished or not.
+    _morphStopped() {}
 
     _removeScaleLater() {
         if (this._scaleLaterId)

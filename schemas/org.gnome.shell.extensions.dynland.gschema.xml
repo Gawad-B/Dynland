@@ -52,6 +52,10 @@
       <default>true</default>
       <summary>Show the next-prayer countdown in the island</summary>
     </key>
+    <key name="activity-recording" type="b">
+      <default>true</default>
+      <summary>Show screen recording in the island (and, in bar layout, instead of on the bar)</summary>
+    </key>
     <key name="prayer-lead-minutes" type="i">
       <range min="1" max="120"/>
       <default>15</default>

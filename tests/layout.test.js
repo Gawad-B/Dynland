@@ -1,5 +1,5 @@
 import {test, assertEqual} from './harness.js';
-import {matchesRole, mergeBarLists, splitIndicators} from '../lib/layout.js';
+import {groupTrayStatus, isTrayRole, matchesRole, mergeBarLists, splitIndicators} from '../lib/layout.js';
 
 const PANEL = {
     left: ['activities', 'apps-menu'],
@@ -75,7 +75,8 @@ test('bar: island slots are empty and barStatus runs more, home, idle, corner', 
         barClock: ['dateMenu'],
         barStatus: [
             'apps-menu', 'vitalsMenu',
-            'keyboard', 'clipboardIndicator', 'appindicator-2', 'appindicator-1',
+            // tray icons right after keyboard (rule: see the tray tests below)
+            'keyboard', 'appindicator-2', 'appindicator-1', 'clipboardIndicator',
             'prayer-times',
             'screenSharing', 'quickSettings',
         ],
@@ -193,21 +194,24 @@ test('bar status order: exact names come first, in list order', () => {
     const r = splitIndicators(PANEL, {...BAR, barStatusOrder: ['prayer-times', 'vitalsMenu']});
     assertEqual(r.barStatus, [
         'prayer-times', 'vitalsMenu',
-        'apps-menu', 'keyboard', 'clipboardIndicator', 'appindicator-2', 'appindicator-1',
+        'apps-menu', 'keyboard', 'appindicator-2', 'appindicator-1', 'clipboardIndicator',
         'screenSharing', 'quickSettings',
     ]);
 });
 
 test('bar status order: wildcard matches several roles, stable among them', () => {
+    // The tray rule moves the tray group after keyboard; apps-menu is listed, so it leads.
     const r = splitIndicators(PANEL, {...BAR, barStatusOrder: ['appindicator-*', 'apps-menu']});
-    assertEqual(r.barStatus.slice(0, 3), ['appindicator-2', 'appindicator-1', 'apps-menu']);
+    assertEqual(r.barStatus.slice(0, 3), ['apps-menu', 'vitalsMenu', 'keyboard']);
+    const o = splitIndicators(PANEL, {...BAR, barStatusOrder: ['apps-menu', 'appindicator-*']});
+    assertEqual(o.barStatus.slice(0, 5), ['apps-menu', 'vitalsMenu', 'keyboard', 'appindicator-2', 'appindicator-1']);
 });
 
 test('bar status order: unlisted roles keep their relative order after listed ones', () => {
     const base = splitIndicators(PANEL, BAR).barStatus;
     const r = splitIndicators(PANEL, {...BAR, barStatusOrder: ['keyboard']}).barStatus;
-    assertEqual(r[0], 'keyboard');
-    assertEqual(r.slice(1), base.filter(x => x !== 'keyboard'));
+    assertEqual(r.slice(0, 3), ['keyboard', 'appindicator-2', 'appindicator-1']);
+    assertEqual(r.slice(3), base.filter(x => x !== 'keyboard' && !isTrayRole(x)));
 });
 
 test('bar status order: unknown names are ignored', () => {
@@ -253,6 +257,77 @@ test('bar status order with notch pages: bar start wins', () => {
     assertEqual(r.barStatus.includes('keyboard'), false);
 });
 
+// ---- tray icons (appindicator-*) sit as one group after keyboard on the status side ----
+
+const TRAY_PANEL = {
+    left: ['activities'],
+    center: ['dateMenu'],
+    right: ['appindicator-:1.9@/x', 'clipboardIndicator', 'appindicator-3', 'keyboard', 'appindicator-1', 'prayer-times', 'quickSettings'],
+};
+const trayBar = (prefs, panel = TRAY_PANEL) => splitIndicators(panel, {...BAR, ...prefs});
+
+test('isTrayRole recognises appindicator- roles only', () => {
+    assertEqual([isTrayRole('appindicator-:1.9@/x'), isTrayRole('appindicator'), isTrayRole('keyboard')], [true, false, false]);
+});
+
+test('tray: grouped after keyboard whatever a scattered barStatusOrder says', () => {
+    const r = trayBar({barStatusOrder: ['appindicator-1', 'clipboardIndicator', 'appindicator-gone', 'appindicator-3', 'quickSettings', 'keyboard']});
+    assertEqual(r.barStatus, ['clipboardIndicator', 'quickSettings', 'keyboard', 'appindicator-1', 'appindicator-3',
+        'appindicator-:1.9@/x', 'prayer-times']);
+});
+
+test('tray: new tray ids join the group without being listed', () => {
+    const r = trayBar({barStatusOrder: ['appindicator-1', 'keyboard']});
+    // Listed tray roles lead the group; the others follow in their order.
+    assertEqual(r.barStatus.slice(0, 4), ['keyboard', 'appindicator-1', 'appindicator-:1.9@/x', 'appindicator-3']);
+});
+
+test('tray: keyboard on the start side puts the group at the front of the status side', () => {
+    const r = trayBar({barStartIndicators: ['keyboard']});
+    assertEqual(r.barStart, ['activities', 'keyboard']);
+    assertEqual(r.barStatus, ['appindicator-:1.9@/x', 'appindicator-3', 'appindicator-1', 'clipboardIndicator', 'prayer-times', 'quickSettings']);
+});
+
+test('tray: without keyboard the group is at the front', () => {
+    const panel = {...TRAY_PANEL, right: TRAY_PANEL.right.filter(x => x !== 'keyboard')};
+    const r = trayBar({barStatusOrder: ['clipboardIndicator', 'appindicator-1']}, panel);
+    assertEqual(r.barStatus, ['appindicator-1', 'appindicator-:1.9@/x', 'appindicator-3', 'clipboardIndicator', 'prayer-times', 'quickSettings']);
+});
+
+test('tray: roles on the start side stay there, the others are grouped', () => {
+    const r = trayBar({barStartIndicators: ['appindicator-3']});
+    assertEqual(r.barStart, ['activities', 'appindicator-3']);
+    assertEqual(r.barStatus, ['keyboard', 'appindicator-:1.9@/x', 'appindicator-1', 'clipboardIndicator', 'prayer-times', 'quickSettings']);
+    const w = trayBar({barStartIndicators: ['appindicator-*']});
+    assertEqual(w.barStart, ['activities', 'appindicator-:1.9@/x', 'appindicator-3', 'appindicator-1']);
+    assertEqual(w.barStatus.some(isTrayRole), false);
+});
+
+test('tray: with notch pages only the tray roles on the bar are grouped', () => {
+    const r = trayBar({barNotchPages: true, barStatusOrder: ['appindicator-1', 'clipboardIndicator', 'keyboard']});
+    // Which roles are on the bar is unchanged: the listed ones (wildcard-free here).
+    assertEqual(r.barStatus, ['clipboardIndicator', 'keyboard', 'appindicator-1', 'prayer-times', 'quickSettings']);
+    assertEqual(r.home, ['appindicator-:1.9@/x', 'appindicator-3']);
+    const w = trayBar({barNotchPages: true, barStatusOrder: ['appindicator-*', 'clipboardIndicator']});
+    assertEqual(w.home, ['keyboard']);
+    // keyboard stays on its page, so the group leads the bar's status side.
+    assertEqual(w.barStatus, ['appindicator-:1.9@/x', 'appindicator-3', 'appindicator-1', 'clipboardIndicator', 'prayer-times', 'quickSettings']);
+});
+
+test('tray: the island layout is unchanged', () => {
+    const island = splitIndicators(TRAY_PANEL, {...DEFAULTS, barStatusOrder: ['appindicator-1', 'keyboard']});
+    assertEqual(island.home, ['keyboard', 'clipboardIndicator', 'appindicator-:1.9@/x', 'appindicator-3', 'appindicator-1']);
+    assertEqual([island.barStart, island.barStatus], [[], []]);
+});
+
+test('groupTrayStatus keeps the relative orders and is idempotent', () => {
+    const roles = ['a', 'appindicator-2', 'keyboard', 'b', 'appindicator-1', 'c'];
+    const g = groupTrayStatus(roles);
+    assertEqual(g, ['a', 'keyboard', 'appindicator-2', 'appindicator-1', 'b', 'c']);
+    assertEqual(groupTrayStatus(g), g);
+    assertEqual(groupTrayStatus(['x', 'appindicator-1']), ['appindicator-1', 'x']);
+});
+
 // ---- drag and drop merging (mergeBarLists) ----
 
 // What the bar shows for `lists`: the role units on each side, as BarDnd reads them.
@@ -264,6 +339,8 @@ const barSides = (prefs, lists) => {
 const moved = (sides, role, to, k) => {
     const out = {start: sides.start.filter(x => x !== role), status: sides.status.filter(x => x !== role)};
     out[to].splice(k, 0, role);
+    // Like BarDnd._arrangement: tray icons have a fixed place on the status side.
+    out.status = groupTrayStatus(out.status);
     return out;
 };
 // Drops and checks the bar then shows exactly what was dropped.
@@ -348,6 +425,24 @@ test('merge: an unlisted status tail stays unlisted when its order holds', () =>
     const lists = {start: [], status: []};
     const merged = drop({}, lists, 'prayer-times', 'status', 0);
     assertEqual(merged.status, ['prayer-times']);
+});
+
+test('merge: an indicator dropped between keyboard and its tray group lands before keyboard or after the group', () => {
+    const lists = {start: [], status: []};
+    const before = barSides({}, lists);
+    const k = before.status.indexOf('keyboard') + 1;
+    const merged = drop({}, lists, 'prayer-times', 'status', k);
+    const r = barSides({}, merged).status;
+    assertEqual(r.indexOf('keyboard') + 1, r.indexOf('appindicator-2'));
+});
+
+test('merge: tray icon to the start side and back joins the group after keyboard', () => {
+    let lists = {start: [], status: []};
+    lists = drop({}, lists, 'appindicator-1', 'start', 0);
+    assertEqual(lists.start.includes('appindicator-1'), true);
+    lists = drop({}, lists, 'appindicator-1', 'status', 0);
+    const r = barSides({}, lists);
+    assertEqual(r.status.slice(r.status.indexOf('keyboard'), r.status.indexOf('keyboard') + 3), ['keyboard', 'appindicator-1', 'appindicator-2']);
 });
 
 test('merge: every arrangement of single moves comes out exactly', () => {

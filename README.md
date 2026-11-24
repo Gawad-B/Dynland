@@ -3,7 +3,8 @@
 A dynamic island for GNOME Shell 50 and 51 that replaces the top bar. The clock and the
 idle indicators (by default Prayer Times) live in one pill that widens on hover into pages
 of indicators; Quick Settings sits at the end of the second page. Notifications,
-media, volume/brightness, battery and the prayer countdown split off into a bubble beside
+media, volume/brightness, battery, the prayer countdown and screen recording (elapsed time
+and a Stop button) split off into a bubble beside
 the island, so the island stays usable. Every feature can be switched off in the preferences.
 
 ## Install
@@ -33,6 +34,10 @@ instead of copying it, so edits apply on the next shell restart.
 - Over the expanded island, scroll (or click the page dots) to reach the second page:
   Vitals, Apps, every other indicator and, at the end, Quick Settings.
 - Hover or click the bubble to open the activity's card.
+- Screen recording (GNOME's screencast) shows in the island as a red dot and the elapsed time;
+  hover for a card with a Stop button. In the MacBook bar layout it shows in the notch, which
+  grows to hold it, and GNOME's own red indicator is kept off the bar while the setting
+  "Screen recording" (Live activities) is on. The other layout leaves GNOME's indicator alone.
 - With "Keep windows below the island" off, the island hides while a window covers it
   (like Dash to Dock's intellihide); push the pointer to the top edge to bring it back.
   Turn "Hide while a window covers the island" off instead to keep it on screen as an

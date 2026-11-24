@@ -135,6 +135,17 @@
 .dynland-prayer-row { spacing: 24px; }
 .dynland-prayer-next { color: #f6d32d; font-weight: bold; }
 
+/* Screen recording */
+.dynland-recording-compact { spacing: 8px; font-weight: bold; }
+.dynland-recording-dot { width: 10px; height: 10px; border-radius: 999px; background-color: #ff3b30; }
+.dynland-recording-time, .dynland-recording-elapsed { font-feature-settings: "tnum"; }
+.dynland-recording-card { spacing: 10px; min-width: 220px; }
+.dynland-recording-top { spacing: 8px; }
+.dynland-recording-title { font-weight: bold; }
+.dynland-recording-elapsed { font-size: 1.6em; font-weight: bold; }
+.dynland-recording-stop { background-color: rgba(224, 27, 36, 0.85); }
+.dynland-recording-stop:hover { background-color: #e01b24; }
+
 /* Volume and brightness */
 .dynland-osd { spacing: 10px; }
 .dynland-level-label { min-width: 24px; text-align: right; font-weight: bold; }

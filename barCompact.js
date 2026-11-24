@@ -425,7 +425,9 @@ export class QuickSettingsCondenser {
         this._shown = [];
         this._watched = new Set();      // source indicators and icons carrying our signals
         this._hold = new VisibilityHold(() => this._queueSync());
-        this._gridHold = new VisibilityHold(null);
+        // A toggle's owner showing or hiding it while a panel is open changes
+        // its item too, so that is synced like any other change.
+        this._gridHold = new VisibilityHold(() => this._queueSync());
         this._laterId = 0;
         this._direct = null;            // {toggle, opacity, dead, dimDescriptor, dimShadow}
         this._opening = false;
@@ -594,6 +596,8 @@ export class QuickSettingsCondenser {
     // the icon of its toggle. GNOME hides some indicators most of the time
     // (Bluetooth with nothing connected), but an item the user put on the
     // bar stays there as long as the feature exists.
+    // The grid hold hides the toggles while a panel is open; that is not the
+    // feature going away, so what counts is the owner's wish, not `visible`.
     _iconsFor(entry) {
         const icons = entry.source.get_children().filter(c => c instanceof St.Icon);
         for (const icon of icons)
@@ -606,7 +610,7 @@ export class QuickSettingsCondenser {
             if (!toggle || !('checked' in toggle))
                 continue;
             this._watchActor(toggle, 'notify::visible', 'notify::icon-name', 'notify::gicon');
-            if (toggle.visible && (toggle.icon_name || toggle.gicon))
+            if (this._gridHold.wants(toggle) && (toggle.icon_name || toggle.gicon))
                 return [toggle];
         }
         return [];
@@ -656,9 +660,9 @@ export class QuickSettingsCondenser {
                     mirror.icon_name = icon.icon_name;
                 else if (icon.gicon)
                     mirror.gicon = icon.gicon;
-                mirror.visible = icon.visible;
+                mirror.visible = this._gridHold.wants(icon);
             });
-            entry.item.visible = icons.some(icon => icon.visible);
+            entry.item.visible = icons.some(icon => this._gridHold.wants(icon));
         }
 
         // Items first (in the settings' order), the control icon last.
