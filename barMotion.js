@@ -37,6 +37,7 @@
 // disable()) and signal handlers (disconnected there).
 
 import Clutter from 'gi://Clutter';
+import GObject from 'gi://GObject';
 import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -44,6 +45,19 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {SLIDE_IN_MS, SLIDE_OUT_MS} from './autoHide.js';
 import {BAR_HEIGHT} from './bar.js';
 import {inFullscreen, motionAllowed, scaleFactor} from './morphBox.js';
+
+// The bar's holder is as large as the monitor, on top of everything. GNOME's
+// drag and drop looks for its target with a pick that includes actors that
+// are not reactive, so a plain widget this size would be the target of every
+// drop on the screen (a window dragged to another workspace in the overview
+// could not be dropped). It is never picked itself, only what it holds.
+const BarClip = GObject.registerClass(
+class DynlandBarClip extends St.Widget {
+    vfunc_pick(context) {
+        for (const child of this.get_children())
+            child.pick(context);
+    }
+});
 
 export class BarMotion {
     /**
@@ -59,7 +73,7 @@ export class BarMotion {
         // While a workspace animation runs: {group, entries, last}.
         this._travel = null;
 
-        this.clip = new St.Widget({
+        this.clip = new BarClip({
             name: 'dynlandBarClip',
             reactive: false,
             clip_to_allocation: true,
